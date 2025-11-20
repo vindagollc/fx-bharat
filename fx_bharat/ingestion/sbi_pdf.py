@@ -66,7 +66,7 @@ class SBIPDFParser:
         try:
             from pypdf import PdfReader  # type: ignore[import-not-found]
         except ModuleNotFoundError:  # pragma: no cover - dependency missing
-            PdfReader = None  # type: ignore[assignment]
+            PdfReader = None  # type: ignore[misc]
 
         if PdfReader is not None:
             try:

@@ -25,13 +25,13 @@ from fx_bharat.utils.rbi import enforce_rbi_min_date
 try:  # pragma: no cover - imported lazily
     from sqlalchemy import create_engine, text
 except ModuleNotFoundError:  # pragma: no cover - dependency missing at runtime
-    create_engine = None  # type: ignore[assignment]
-    text = None  # type: ignore[assignment]
+    create_engine = None  # type: ignore[misc,assignment]
+    text = None  # type: ignore[misc,assignment]
 
 try:  # pragma: no cover - imported lazily
     from pymongo import MongoClient
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
-    MongoClient = None  # type: ignore[assignment]
+    MongoClient = None  # type: ignore[misc]
 
 __all__ = [
     "__version__",

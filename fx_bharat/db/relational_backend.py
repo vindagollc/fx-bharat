@@ -64,8 +64,36 @@ INSERT INTO forex_rates_rbi(rate_date, currency_code, rate, base_currency, creat
 VALUES(:rate_date, :currency_code, :rate, :base_currency, :created_at)
 """
 INSERT_SBI_SQL = """
-INSERT INTO forex_rates_sbi(rate_date, currency_code, rate, base_currency, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell, cn_buy, cn_sell, created_at)
-VALUES(:rate_date, :currency_code, :rate, :base_currency, :tt_buy, :tt_sell, :bill_buy, :bill_sell, :travel_card_buy, :travel_card_sell, :cn_buy, :cn_sell, :created_at)
+INSERT INTO forex_rates_sbi(
+    rate_date,
+    currency_code,
+    rate,
+    base_currency,
+    tt_buy,
+    tt_sell,
+    bill_buy,
+    bill_sell,
+    travel_card_buy,
+    travel_card_sell,
+    cn_buy,
+    cn_sell,
+    created_at
+)
+VALUES(
+    :rate_date,
+    :currency_code,
+    :rate,
+    :base_currency,
+    :tt_buy,
+    :tt_sell,
+    :bill_buy,
+    :bill_sell,
+    :travel_card_buy,
+    :travel_card_sell,
+    :cn_buy,
+    :cn_sell,
+    :created_at
+)
 """
 
 

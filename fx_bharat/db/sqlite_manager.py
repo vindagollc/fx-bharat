@@ -92,7 +92,19 @@ VALUES(?, ?, ?);
 """
 
 INSERT_SBI_IGNORE_STATEMENT = """
-INSERT OR IGNORE INTO forex_rates_sbi(rate_date, currency, rate, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell, cn_buy, cn_sell)
+INSERT OR IGNORE INTO forex_rates_sbi(
+    rate_date,
+    currency,
+    rate,
+    tt_buy,
+    tt_sell,
+    bill_buy,
+    bill_sell,
+    travel_card_buy,
+    travel_card_sell,
+    cn_buy,
+    cn_sell
+)
 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 """
 
