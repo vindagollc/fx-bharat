@@ -2,46 +2,50 @@ from datetime import date
 
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.1.0
+print(FxBharat.__version__)  # 0.3.0
 
 # Default Usage
 fx = FxBharat()
 
-# Latest Forex entry
-rate = fx.rate()
-print(rate)
-# => {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}
+# Latest Forex entries
+rates = fx.rate()
+print(rates)
 
-# Specific Forex entry by date (optional rate_date)
-historical_rate = fx.rate(rate_date=date(2025, 11, 1))
-print(historical_rate)
-# => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'rates': {...}}
+# Specific Forex entries by date (optional rate_date)
+historical_rates = fx.rate(rate_date=date(2025, 11, 1))
+print(historical_rates)
 
 # weekly Forex entries
-rates = fx.rates(
+history = fx.history(
     from_date=date(2025, 11, 1),
     to_date=date.today(),
     frequency="daily",
 )
-print(rates)
-# => [{'rate_date': date(2025, 11, 3), 'rates': {...}}, ...]
+print(history[:2])
 
 # monthly Forex entries
-rates = fx.rates(
+history = fx.history(
     from_date=date(2025, 9, 1),
     to_date=date.today(),
     frequency="monthly",
 )
-print(rates)
-# => [{'rate_date': date(2025, 9, 30), 'rates': {...}}, ...]
+print(history)
+# => [{'rate_date': date(2025, 9, 30), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # yearly Forex entries
-rates = fx.rates(
+history = fx.history(
     from_date=date(2023, 9, 1),
     to_date=date.today(),
     frequency="yearly",
 )
-print(rates)
-# => [{'rate_date': date(2023, 12, 29), 'rates': {...}}, ...]
+print(history)
+# => [{'rate_date': date(2023, 12, 29), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
-fx.seed(from_date=date.today(), to_date=date.today())
+# Seed today's RBI + SBI Forex Card rates and fetch the latest snapshot
+fx.seed()
+print(fx.rate())
+
+# Seed historical RBI Forex rates for a specific window
+fx.seed_historical(from_date=date(2020, 1, 1), to_date=date(2025, 11, 19), source="SBI")
+fx.seed_historical(from_date=date(2022, 4, 12), to_date=date(2025, 11, 19), source="RBI")
+#

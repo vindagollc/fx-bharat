@@ -1,12 +1,18 @@
 # **fx-bharat**
 
 [![PyPI Version](https://img.shields.io/pypi/v/fx-bharat.svg)](https://pypi.org/project/fx-bharat/)
-[![PyPI Downloads](https://img.shields.io/pypi/dm/fx-bharat.svg)](https://pypi.org/project/fx-bharat/)
+[![Downloads](https://pepy.tech/badge/fx-bharat)](https://pepy.tech/project/fx-bharat)
 ![Wheel](https://img.shields.io/pypi/wheel/fx-bharat.svg)
 [![License](https://img.shields.io/pypi/l/fx-bharat.svg)](https://pypi.org/project/fx-bharat/)
 ![Status](https://img.shields.io/pypi/status/fx-bharat.svg)
 [![Python Versions](https://img.shields.io/pypi/pyversions/fx-bharat.svg)](https://pypi.org/project/fx-bharat/)
-
+![Typed](https://img.shields.io/badge/typed-yes-blue.svg)
+![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)
+![SQLite Included](https://img.shields.io/badge/database-SQLite-lightgrey)
+![isort](https://img.shields.io/badge/imports-isort-%2300aacd.svg)
+![flake8](https://img.shields.io/badge/flake8-enabled-blue.svg)
+![mypy](https://img.shields.io/badge/mypy-checked-2a6df4.svg)
+![CI](https://github.com/vindagollc/fx-bharat/actions/workflows/ci.yml/badge.svg)
 
 ---
 
@@ -14,7 +20,8 @@
 
 Every published wheel bundles historical forex data from:
 
-> **12/04/2022 → 18/11/2025**
+> RBI archive ingested from **12/04/2022 → 20/11/2025**
+> SBI Forex PDFs ingested from **01/01/2020 → 20/11/2025**
 
 so the package is **immediately useful** with no setup required.
 
@@ -29,6 +36,7 @@ so the package is **immediately useful** with no setup required.
 * [Usage](#usage)
   * [1. Quick Start (Bundled SQLite)](#1-quick-start-using-bundled-sqlite-database)
     * [Sqlite Example](#example-default-sqlite)
+  * [Source Selection (RBI vs SBI)](#source-selection-rbi-vs-sbi)
   * [2. External Database Examples](#2-connecting-to-your-own-database)
     * [Checking Database Connectivity](#checking-database-connectivity-external)
     * [PostgreSQL Example](#example-postgresql)
@@ -59,18 +67,24 @@ All of this works **default-first**: install the package → start querying FX r
 
 # **Data Source**
 
-FxBharat retrieves daily *reference exchange rates* from the official:
+FxBharat retrieves daily *reference exchange rates* from:
 
-👉 **RBI Reference Rate Archive**
-[https://www.rbi.org.in/Scripts/ReferenceRateArchive.aspx](https://www.rbi.org.in/Scripts/ReferenceRateArchive.aspx)
+* 👉 **RBI Reference Rate Archive** — [https://www.rbi.org.in/Scripts/ReferenceRateArchive.aspx](https://www.rbi.org.in/Scripts/ReferenceRateArchive.aspx)
+* 👉 **SBI Forex Card Rates PDF** — [https://sbi.bank.in/documents/16012/1400784/FOREX_CARD_RATES.pdf](https://sbi.bank.in/documents/16012/1400784/FOREX_CARD_RATES.pdf)
+
+Coverage today:
+
+* RBI archive ingested from **12/04/2022 → 20/11/2025**
+* SBI Forex PDFs ingested from **01/01/2020 → 20/11/2025**
 
 Workflow:
 
-1. **Selenium** downloads the Excel/HTML reference rate workbook
+1. **Selenium** downloads the RBI Excel/HTML reference rate workbook
 2. **BeautifulSoup4 + pandas** parse and normalize the data
-3. **SQLAlchemy or PyMongo** persist these rows into your configured backend
+3. **pypdf** parses SBI's Forex Card PDF when you opt into the SBI source
+4. **SQLAlchemy or PyMongo** persist these rows into your configured backend
 
-The resulting dataset mirrors RBI's public release structure.
+The resulting dataset mirrors the RBI reference rates or SBI Forex card tables while keeping a `source` column to distinguish entries.
 
 ---
 
@@ -105,7 +119,7 @@ pip install -e .
 fx_bharat/
     __init__.py               # FxBharat façade
     db/
-        forex.db              # Bundled SQLite snapshot (12/04/2022–18/11/2025)
+        forex.db              # Bundled SQLite snapshot
         base_backend.py       # Unified DB backend interface
         relational_backend.py # SQLAlchemy ORM helpers
         sqlite_backend.py     # SQLite adapter (default)
@@ -117,11 +131,14 @@ fx_bharat/
         rbi_selenium.py       # Selenium automation
         rbi_workbook.py       # HTML/Excel → DataFrame converter
         rbi_csv.py            # Intermediate CSV helpers
+        sbi_pdf.py            # SBI Forex Card PDF parser
         models.py             # Dataclasses for parsed rates
     seeds/
         populate_rbi_forex.py # Programmatic seeding logic
+        populate_sbi_forex.py # SBI seeding logic (backfills PDFs into SQLite)
     scripts/
         populate_rbi_forex.py # Legacy CLI
+        populate_sbi_forex.py # SBI CLI helper
     utils/
         date_range.py         # Date interval utilities
         logger.py             # Structured logging
@@ -143,71 +160,79 @@ from fx_bharat import FxBharat
 
 fx = FxBharat()  # Uses bundled SQLite forex.db
 
-# Update today's rates
-fx.seed(from_date=date.today(), to_date=date.today())
+# Insert today's RBI + SBI data
+fx.seed()
 
-# Get latest available snapshot
-print(fx.rate())
+# Get latest available snapshots (SBI first, then RBI)
+latest = fx.rate()
+print(latest)
+# => [
+#   {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'source': 'SBI', 'rates': {...}},
+#   {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}},
+# ]
 
-# Get a specific day's snapshot (optional `rate_date`)
+# Get a specific day's snapshots (optional `rate_date`)
 print(fx.rate(rate_date=date(2025, 11, 1)))
 
 # Fetch a historical window
-history = fx.rates(date(2025, 10, 1), date(2025, 10, 31), frequency="weekly")
+history = fx.history(date(2025, 10, 1), date(2025, 10, 31), frequency="weekly")
 
-for row in history:
-    print(row.rate_date, row.currency, row.value)
+for snapshot in history:
+    print(snapshot["rate_date"], snapshot["source"], snapshot["rates"].get("USD"))
 ```
 
 ### What these methods do:
 
 * `.seed(start_date, end_date)` → Downloads & inserts missing entries
-* `.rate(rate_date=None)` → Returns **latest available** FX observation (or a specific `rate_date` if provided)
-* `.rates(start, end, frequency)` → Supports
+* `.rate(rate_date=None)` → Returns **latest available** SBI and RBI observations (or specific `rate_date` snapshots) with SBI first
+* `.history(start, end, frequency)` → Supports
 
   * `"daily"`
   * `"weekly"`
   * `"monthly"`
   * `"yearly"`
 
+> Legacy note: the former `.rates()` helper now lives on as a deprecated alias of `.history()`; new code should prefer `.history()` or `.historical()`.
+
 ---
 
 ### Example: Default (Sqlite)
 
 ```python
-from fx_bharat import FxBharat
 from datetime import date
+from fx_bharat import FxBharat
+
+print(FxBharat.__version__)  # 0.3.0
 
 # Default Usage
 fx = FxBharat()
 
-# Latest Forex entry
-rate = fx.rate()
-print(rate) 
-# => {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}
+# Latest Forex entries (SBI then RBI if available)
+rates = fx.rate()
+print(rates)
 
-# Specific Forex entry by date (optional rate_date)
-historical_rate = fx.rate(rate_date=date(2025, 11, 1))
-print(historical_rate)
-# => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'rates': {...}}
+# Specific Forex entries by date (optional rate_date)
+historical_rates = fx.rate(rate_date=date(2025, 11, 1))
+print(historical_rates)
 
-# weekly Forex entries
-rates = fx.rates(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
-print(rates) 
-# => [{'rate_date': datetime.date(2025, 11, 3), 'base_currency': 'INR', 'rates': {'EUR': 102.4348, 'GBP': 116.6974, 'JPY': 57.59, 'USD': 88.7932}}, {'rate_date': datetime.date(2025, 11, 4), 'base_currency': 'INR', 'rates': {'EUR': 102.1384, 'GBP': 116.3168, 'JPY': 57.72, 'USD': 88.6372}}, {'rate_date': datetime.date(2025, 11, 6), 'base_currency': 'INR', 'rates': {'EUR': 101.981, 'GBP': 115.751, 'JPY': 57.58, 'USD': 88.6026}}, {'rate_date': datetime.date(2025, 11, 7), 'base_currency': 'INR', 'rates': {'EUR': 102.3041, 'GBP': 116.3691, 'JPY': 57.81, 'USD': 88.705}}, {'rate_date': datetime.date(2025, 11, 10), 'base_currency': 'INR', 'rates': {'EUR': 102.5332, 'GBP': 116.6558, 'JPY': 57.59, 'USD': 88.6761}}, {'rate_date': datetime.date(2025, 11, 11), 'base_currency': 'INR', 'rates': {'EUR': 102.5435, 'GBP': 116.8044, 'JPY': 57.53, 'USD': 88.6983}}, {'rate_date': datetime.date(2025, 11, 12), 'base_currency': 'INR', 'rates': {'EUR': 102.6431, 'GBP': 116.4544, 'JPY': 57.31, 'USD': 88.6362}}, {'rate_date': datetime.date(2025, 11, 13), 'base_currency': 'INR', 'rates': {'EUR': 102.7633, 'GBP': 116.3924, 'JPY': 57.26, 'USD': 88.716}}, {'rate_date': datetime.date(2025, 11, 14), 'base_currency': 'INR', 'rates': {'EUR': 103.3188, 'GBP': 116.7194, 'JPY': 57.44, 'USD': 88.742}}, {'rate_date': datetime.date(2025, 11, 17), 'base_currency': 'INR', 'rates': {'EUR': 102.7925, 'GBP': 116.445, 'JPY': 57.26, 'USD': 88.63}}, {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}]
+# Daily Forex entries (SBI first, then RBI snapshots)
+rates = fx.history(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
+print(rates[:2])
 
-# monthly Forex entries
-rates = fx.rates(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
-print(rates) 
-# => [{'rate_date': datetime.date(2025, 9, 30), 'base_currency': 'INR', 'rates': {'EUR': 104.222, 'GBP': 119.354, 'JPY': 59.91, 'USD': 88.7923}}, {'rate_date': datetime.date(2025, 10, 31), 'base_currency': 'INR', 'rates': {'EUR': 102.6745, 'GBP': 116.6947, 'JPY': 57.61, 'USD': 88.7241}}, {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}]
+# Monthly Forex entries
+monthly_rates = fx.history(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
+print(monthly_rates)
 
-# yearly Forex entries
-rates = fx.rates(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
-print(rates) 
-# => [{'rate_date': datetime.date(2023, 12, 29), 'base_currency': 'INR', 'rates': {'EUR': 92.0049, 'GBP': 106.1053, 'JPY': 58.82, 'USD': 83.1164}}, {'rate_date': datetime.date(2024, 12, 31), 'base_currency': 'INR', 'rates': {'EUR': 89.0852, 'GBP': 107.4645, 'JPY': 54.82, 'USD': 85.6232}}, {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}]
+# Yearly Forex entries
+yearly_rates = fx.history(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
+print(yearly_rates)
 
-fx.seed(from_date=date.today(), to_date=date.today())
+fx.seed()
 ```
+
+## Source Selection (RBI vs SBI)
+
+FxBharat now stores RBI and SBI data in **separate tables/collections**. Query helpers always return SBI snapshots first (when present) followed by RBI snapshots. Use `seed_historical(..., source="RBI" | "SBI")` to ingest archival PDFs for a specific source; `seed()` pulls both sources for the current day and saves the SBI PDF into `resources/`.
 
 ## **2. Connecting to Your Own Database**
 
@@ -253,35 +278,32 @@ if not success:
     print(error)
     exit(1)
 
-fx.migrate() 
+fx.migrate()
 # =>  will migrate the date from Sqlite to PostgreSQL
 
 # Latest Forex entry
 rate = fx.rate()
-print(rate) 
-# => {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}
+print(rate)
+# => {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
 
-# Specific Forex entry by date (optional rate_date)
-historical_rate = fx.rate(rate_date=date(2025, 11, 1))
-print(historical_rate)
-# => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'rates': {...}}
+# Specific Forex entries by date (optional rate_date)
+historical_rates = fx.rate(rate_date=date(2025, 11, 1))
+print(historical_rates)
 
-# weekly Forex entries
-rates = fx.rates(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
-print(rates) 
-# => [{'rate_date': datetime.date(2025, 11, 3), 'base_currency': 'INR', 'rates': {'EUR': 102.4348, 'GBP': 116.6974, 'JPY': 57.59, 'USD': 88.7932}}, {'rate_date': datetime.date(2025, 11, 4), 'base_currency': 'INR', 'rates': {'EUR': 102.1384, 'GBP': 116.3168, 'JPY': 57.72, 'USD': 88.6372}}, {'rate_date': datetime.date(2025, 11, 6), 'base_currency': 'INR', 'rates': {'EUR': 101.981, 'GBP': 115.751, 'JPY': 57.58, 'USD': 88.6026}}, {'rate_date': datetime.date(2025, 11, 7), 'base_currency': 'INR', 'rates': {'EUR': 102.3041, 'GBP': 116.3691, 'JPY': 57.81, 'USD': 88.705}}, {'rate_date': datetime.date(2025, 11, 10), 'base_currency': 'INR', 'rates': {'EUR': 102.5332, 'GBP': 116.6558, 'JPY': 57.59, 'USD': 88.6761}}, {'rate_date': datetime.date(2025, 11, 11), 'base_currency': 'INR', 'rates': {'EUR': 102.5435, 'GBP': 116.8044, 'JPY': 57.53, 'USD': 88.6983}}, {'rate_date': datetime.date(2025, 11, 12), 'base_currency': 'INR', 'rates': {'EUR': 102.6431, 'GBP': 116.4544, 'JPY': 57.31, 'USD': 88.6362}}, {'rate_date': datetime.date(2025, 11, 13), 'base_currency': 'INR', 'rates': {'EUR': 102.7633, 'GBP': 116.3924, 'JPY': 57.26, 'USD': 88.716}}, {'rate_date': datetime.date(2025, 11, 14), 'base_currency': 'INR', 'rates': {'EUR': 103.3188, 'GBP': 116.7194, 'JPY': 57.44, 'USD': 88.742}}, {'rate_date': datetime.date(2025, 11, 17), 'base_currency': 'INR', 'rates': {'EUR': 102.7925, 'GBP': 116.445, 'JPY': 57.26, 'USD': 88.63}}, {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}]
+# Weekly/daily Forex entries (SBI first, then RBI)
+rates = fx.history(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
+print(rates[:2])
 
-# monthly Forex entries
-rates = fx.rates(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
-print(rates) 
-# => [{'rate_date': datetime.date(2025, 9, 30), 'base_currency': 'INR', 'rates': {'EUR': 104.222, 'GBP': 119.354, 'JPY': 59.91, 'USD': 88.7923}}, {'rate_date': datetime.date(2025, 10, 31), 'base_currency': 'INR', 'rates': {'EUR': 102.6745, 'GBP': 116.6947, 'JPY': 57.61, 'USD': 88.7241}}, {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}]
+# Monthly Forex entries
+rates = fx.history(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
+print(rates)
 
-# yearly Forex entries
-rates = fx.rates(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
-print(rates) 
-# => [{'rate_date': datetime.date(2023, 12, 29), 'base_currency': 'INR', 'rates': {'EUR': 92.0049, 'GBP': 106.1053, 'JPY': 58.82, 'USD': 83.1164}}, {'rate_date': datetime.date(2024, 12, 31), 'base_currency': 'INR', 'rates': {'EUR': 89.0852, 'GBP': 107.4645, 'JPY': 54.82, 'USD': 85.6232}}, {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}]
+# Yearly Forex entries
+rates = fx.history(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
+print(rates)
 
-fx.seed(from_date=date.today(), to_date=date.today())
+# Seed SBI + RBI Forex rates into PostgreSQL as well
+fx.seed()
 ```
 
 ### Example: MySQL/MariaDB
@@ -297,35 +319,39 @@ if not success:
     print(error)
     exit(1)
 
-fx.migrate() 
+fx.migrate()
 # =>  will migrate the date from Sqlite to MySQL
 
 # Latest Forex entry
 rate = fx.rate()
-print(rate) 
-# => {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}
+print(rate)
+# => {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
 
 # Specific Forex entry by date (optional rate_date)
 historical_rate = fx.rate(rate_date=date(2025, 11, 1))
 print(historical_rate)
-# => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'rates': {...}}
+# => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
 
 # weekly Forex entries
-rates = fx.rates(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
-print(rates) 
-# => [{'rate_date': datetime.date(2025, 11, 3), 'base_currency': 'INR', 'rates': {'EUR': 102.4348, 'GBP': 116.6974, 'JPY': 57.59, 'USD': 88.7932}}, {'rate_date': datetime.date(2025, 11, 4), 'base_currency': 'INR', 'rates': {'EUR': 102.1384, 'GBP': 116.3168, 'JPY': 57.72, 'USD': 88.6372}}, {'rate_date': datetime.date(2025, 11, 6), 'base_currency': 'INR', 'rates': {'EUR': 101.981, 'GBP': 115.751, 'JPY': 57.58, 'USD': 88.6026}}, {'rate_date': datetime.date(2025, 11, 7), 'base_currency': 'INR', 'rates': {'EUR': 102.3041, 'GBP': 116.3691, 'JPY': 57.81, 'USD': 88.705}}, {'rate_date': datetime.date(2025, 11, 10), 'base_currency': 'INR', 'rates': {'EUR': 102.5332, 'GBP': 116.6558, 'JPY': 57.59, 'USD': 88.6761}}, {'rate_date': datetime.date(2025, 11, 11), 'base_currency': 'INR', 'rates': {'EUR': 102.5435, 'GBP': 116.8044, 'JPY': 57.53, 'USD': 88.6983}}, {'rate_date': datetime.date(2025, 11, 12), 'base_currency': 'INR', 'rates': {'EUR': 102.6431, 'GBP': 116.4544, 'JPY': 57.31, 'USD': 88.6362}}, {'rate_date': datetime.date(2025, 11, 13), 'base_currency': 'INR', 'rates': {'EUR': 102.7633, 'GBP': 116.3924, 'JPY': 57.26, 'USD': 88.716}}, {'rate_date': datetime.date(2025, 11, 14), 'base_currency': 'INR', 'rates': {'EUR': 103.3188, 'GBP': 116.7194, 'JPY': 57.44, 'USD': 88.742}}, {'rate_date': datetime.date(2025, 11, 17), 'base_currency': 'INR', 'rates': {'EUR': 102.7925, 'GBP': 116.445, 'JPY': 57.26, 'USD': 88.63}}, {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}]
+rates = fx.history(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
+print(rates[:2])
+# => [{'rate_date': datetime.date(2025, 11, 3), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # monthly Forex entries
-rates = fx.rates(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
-print(rates) 
-# => [{'rate_date': datetime.date(2025, 9, 30), 'base_currency': 'INR', 'rates': {'EUR': 104.222, 'GBP': 119.354, 'JPY': 59.91, 'USD': 88.7923}}, {'rate_date': datetime.date(2025, 10, 31), 'base_currency': 'INR', 'rates': {'EUR': 102.6745, 'GBP': 116.6947, 'JPY': 57.61, 'USD': 88.7241}}, {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}]
+rates = fx.history(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
+print(rates)
+# => [{'rate_date': datetime.date(2025, 9, 30), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # yearly Forex entries
-rates = fx.rates(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
-print(rates) 
-# => [{'rate_date': datetime.date(2023, 12, 29), 'base_currency': 'INR', 'rates': {'EUR': 92.0049, 'GBP': 106.1053, 'JPY': 58.82, 'USD': 83.1164}}, {'rate_date': datetime.date(2024, 12, 31), 'base_currency': 'INR', 'rates': {'EUR': 89.0852, 'GBP': 107.4645, 'JPY': 54.82, 'USD': 85.6232}}, {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}]
+rates = fx.history(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
+print(rates)
+# => [{'rate_date': datetime.date(2023, 12, 29), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
-fx.seed(from_date=date.today(), to_date=date.today())
+# Seed SBI Forex Card rates into MySQL as well
+fx.seed()
+print(fx.rate())
+
+fx.seed()
 ```
 
 ### Example: MongoDB
@@ -337,39 +363,43 @@ from datetime import date
 fx = FxBharat(db_config='mongodb://127.0.0.1:27017/forex')
 
 success, error = fx.conection()
-if success:
+if not success:
     print(error)
     exit(1)
     
-fx.migrate() 
+fx.migrate()
 # =>  will migrate the date from Sqlite to MongoDB
 
 # Latest Forex entry
 rate = fx.rate()
-print(rate) 
-# => {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}
+print(rate)
+# => {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
 
 # Specific Forex entry by date (optional rate_date)
 historical_rate = fx.rate(rate_date=date(2025, 11, 1))
 print(historical_rate)
-# => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'rates': {...}}
+# => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
 
 # weekly Forex entries
-rates = fx.rates(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
-print(rates) 
-# => [{'rate_date': datetime.date(2025, 11, 3), 'base_currency': 'INR', 'rates': {'EUR': 102.4348, 'GBP': 116.6974, 'JPY': 57.59, 'USD': 88.7932}}, {'rate_date': datetime.date(2025, 11, 4), 'base_currency': 'INR', 'rates': {'EUR': 102.1384, 'GBP': 116.3168, 'JPY': 57.72, 'USD': 88.6372}}, {'rate_date': datetime.date(2025, 11, 6), 'base_currency': 'INR', 'rates': {'EUR': 101.981, 'GBP': 115.751, 'JPY': 57.58, 'USD': 88.6026}}, {'rate_date': datetime.date(2025, 11, 7), 'base_currency': 'INR', 'rates': {'EUR': 102.3041, 'GBP': 116.3691, 'JPY': 57.81, 'USD': 88.705}}, {'rate_date': datetime.date(2025, 11, 10), 'base_currency': 'INR', 'rates': {'EUR': 102.5332, 'GBP': 116.6558, 'JPY': 57.59, 'USD': 88.6761}}, {'rate_date': datetime.date(2025, 11, 11), 'base_currency': 'INR', 'rates': {'EUR': 102.5435, 'GBP': 116.8044, 'JPY': 57.53, 'USD': 88.6983}}, {'rate_date': datetime.date(2025, 11, 12), 'base_currency': 'INR', 'rates': {'EUR': 102.6431, 'GBP': 116.4544, 'JPY': 57.31, 'USD': 88.6362}}, {'rate_date': datetime.date(2025, 11, 13), 'base_currency': 'INR', 'rates': {'EUR': 102.7633, 'GBP': 116.3924, 'JPY': 57.26, 'USD': 88.716}}, {'rate_date': datetime.date(2025, 11, 14), 'base_currency': 'INR', 'rates': {'EUR': 103.3188, 'GBP': 116.7194, 'JPY': 57.44, 'USD': 88.742}}, {'rate_date': datetime.date(2025, 11, 17), 'base_currency': 'INR', 'rates': {'EUR': 102.7925, 'GBP': 116.445, 'JPY': 57.26, 'USD': 88.63}}, {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}]
+rates = fx.history(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
+print(rates[:2])
+# => [{'rate_date': datetime.date(2025, 11, 3), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # monthly Forex entries
-rates = fx.rates(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
-print(rates) 
-# => [{'rate_date': datetime.date(2025, 9, 30), 'base_currency': 'INR', 'rates': {'EUR': 104.222, 'GBP': 119.354, 'JPY': 59.91, 'USD': 88.7923}}, {'rate_date': datetime.date(2025, 10, 31), 'base_currency': 'INR', 'rates': {'EUR': 102.6745, 'GBP': 116.6947, 'JPY': 57.61, 'USD': 88.7241}}, {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}]
+rates = fx.history(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
+print(rates)
+# => [{'rate_date': datetime.date(2025, 9, 30), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # yearly Forex entries
-rates = fx.rates(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
-print(rates) 
-# => [{'rate_date': datetime.date(2023, 12, 29), 'base_currency': 'INR', 'rates': {'EUR': 92.0049, 'GBP': 106.1053, 'JPY': 58.82, 'USD': 83.1164}}, {'rate_date': datetime.date(2024, 12, 31), 'base_currency': 'INR', 'rates': {'EUR': 89.0852, 'GBP': 107.4645, 'JPY': 54.82, 'USD': 85.6232}}, {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}]
+rates = fx.history(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
+print(rates)
+# => [{'rate_date': datetime.date(2023, 12, 29), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
-fx.seed(from_date=date.today(), to_date=date.today())
+# Seed SBI Forex Card rates into MongoDB as well
+fx.seed()
+print(fx.rate())
+
+fx.seed()
 ```
 
 FxBharat internally sanitizes the DSN to satisfy PyMongo.

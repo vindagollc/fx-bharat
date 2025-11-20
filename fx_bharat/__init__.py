@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import warnings
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
@@ -38,6 +39,9 @@ __all__ = [
     "DatabaseConnectionInfo",
     "FxBharat",
     "seed_rbi_forex",
+    "seed_sbi_forex",
+    "seed_sbi_historical",
+    "seed_sbi_today",
     "SQLiteManager",
     "PersistenceResult",
     "RBISeleniumClient",
@@ -46,7 +50,31 @@ __all__ = [
 try:
     __version__ = importlib_metadata.version("fx-bharat")
 except importlib_metadata.PackageNotFoundError:  # pragma: no cover - fallback for local runs
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
+
+
+def seed_rbi_forex(*args, **kwargs):
+    from fx_bharat.seeds.populate_rbi_forex import seed_rbi_forex as _seed_rbi_forex
+
+    return _seed_rbi_forex(*args, **kwargs)
+
+
+def seed_sbi_forex(*args, **kwargs):
+    from fx_bharat.seeds.populate_sbi_forex import seed_sbi_forex as _seed_sbi_forex
+
+    return _seed_sbi_forex(*args, **kwargs)
+
+
+def seed_sbi_historical(*args, **kwargs):
+    from fx_bharat.seeds.populate_sbi_forex import seed_sbi_historical as _seed_sbi_historical
+
+    return _seed_sbi_historical(*args, **kwargs)
+
+
+def seed_sbi_today(*args, **kwargs):
+    from fx_bharat.seeds.populate_sbi_forex import seed_sbi_today as _seed_sbi_today
+
+    return _seed_sbi_today(*args, **kwargs)
 
 
 class DatabaseBackend(str, Enum):
@@ -277,34 +305,51 @@ class FxBharat:
         target_backend.ensure_schema()
         target_backend.insert_rates(rows)
 
-    def seed(self, from_date: date, to_date: date) -> None:
-        """Seed SQLite and mirror rows into the configured backend."""
+    def seed_historical(
+        self,
+        from_date: date,
+        to_date: date,
+        *,
+        source: str = "RBI",
+        resource_dir: str | Path | None = None,
+        download_latest: bool | None = None,
+    ) -> None:
+        """Seed SQLite and mirror rows into the configured backend using past data."""
 
-        from fx_bharat.seeds.populate_rbi_forex import seed_rbi_forex as _seed_rbi_forex
+        if to_date >= date.today():
+            raise ValueError("Historical seeding requires `to_date` to be earlier than today")
 
-        enforce_rbi_min_date(from_date, to_date)
+        source_upper = source.upper()
+        if source_upper == "RBI":
+            enforce_rbi_min_date(from_date, to_date)
 
-        # Always populate the bundled SQLite database so that the packaged
-        # dataset stays up to date irrespective of which backend callers use.
         sqlite_db_path = (
             Path(self.sqlite_manager.db_path)
             if self.sqlite_manager is not None
             else DEFAULT_SQLITE_DB_PATH
         )
 
-        _seed_rbi_forex(
-            from_date.isoformat(),
-            to_date.isoformat(),
-            db_path=sqlite_db_path,
-        )
+        if source_upper == "RBI":
+            seed_rbi_forex(
+                from_date.isoformat(),
+                to_date.isoformat(),
+                db_path=sqlite_db_path,
+            )
+        elif source_upper == "SBI":
+            seed_sbi_historical(
+                db_path=sqlite_db_path,
+                resource_dir=resource_dir or Path("resources"),
+                start=from_date,
+                end=to_date,
+                download=True if download_latest is None else download_latest,
+            )
+        else:
+            raise ValueError("Unsupported source. Use 'RBI' or 'SBI'.")
 
-        # When an external backend (Postgres/MySQL/Mongo) is configured we copy
-        # the freshly seeded SQLite rows across so that both datastores remain
-        # in sync for the requested range.
         if self.connection_info.is_external:
             sqlite_backend = SQLiteBackend(db_path=sqlite_db_path)
             try:
-                rows = sqlite_backend.fetch_range(from_date, to_date)
+                rows = sqlite_backend.fetch_range(from_date, to_date, source=source_upper)
             finally:
                 sqlite_backend.close()
 
@@ -312,24 +357,58 @@ class FxBharat:
             target_backend.ensure_schema()
             target_backend.insert_rates(rows)
 
-    def rate(self, rate_date: date | None = None) -> Dict[str, Any]:
+    def seed(
+        self,
+        *,
+        resource_dir: str | Path | None = None,
+    ) -> None:
+        """Insert today's data for both RBI and SBI and mirror to external backends."""
+
+        today = date.today()
+        sqlite_db_path = (
+            Path(self.sqlite_manager.db_path)
+            if self.sqlite_manager is not None
+            else DEFAULT_SQLITE_DB_PATH
+        )
+
+        seed_rbi_forex(today.isoformat(), today.isoformat(), db_path=sqlite_db_path)
+        seed_sbi_today(
+            db_path=sqlite_db_path,
+            resource_dir=resource_dir or Path("resources"),
+        )
+
+        if self.connection_info.is_external:
+            sqlite_backend = SQLiteBackend(db_path=sqlite_db_path)
+            try:
+                rows = sqlite_backend.fetch_range(today, today, source=None)
+            finally:
+                sqlite_backend.close()
+
+            target_backend = self._get_backend_strategy()
+            target_backend.ensure_schema()
+            target_backend.insert_rates(rows)
+
+    def rate(self, rate_date: date | None = None) -> List[Dict[str, Any]]:
         """Return a forex rate snapshot for ``rate_date`` or the latest entry."""
 
         backend = self._get_backend_strategy()
-        if rate_date is not None:
-            enforce_rbi_min_date(rate_date)
-            grouped = self._group_rows_by_date(backend.fetch_range(rate_date, rate_date))
-        else:
-            grouped = self._group_rows_by_date(backend.fetch_range())
-        if not grouped:
-            return {}
-        target_date = rate_date if rate_date is not None else max(grouped.keys())
-        snapshot = grouped.get(target_date)
-        if snapshot is None:
-            return {}
-        return self._snapshot_payload(target_date, snapshot)
+        snapshots: List[Dict[str, Any]] = []
 
-    def rates(
+        for source in ("SBI", "RBI"):
+            if rate_date is not None and source == "RBI":
+                enforce_rbi_min_date(rate_date)
+            rows = (
+                backend.fetch_range(rate_date, rate_date, source=source)
+                if rate_date is not None
+                else backend.fetch_range(source=source)
+            )
+            snapshot = self._latest_snapshot_from_rows(rows, rate_date, source)
+            if snapshot:
+                snapshots.append(snapshot)
+
+        return snapshots
+
+    def history(
         self,
         from_date: date,
         to_date: date,
@@ -346,31 +425,101 @@ class FxBharat:
         freq = frequency.lower()
         if freq not in {"daily", "weekly", "monthly", "yearly"}:
             raise ValueError("frequency must be one of: daily, weekly, monthly, yearly")
-        enforce_rbi_min_date(from_date, to_date)
-        rows = self._get_backend_strategy().fetch_range(from_date, to_date)
-        grouped = self._group_rows_by_date(rows)
-        if not grouped:
-            return []
-        sorted_dates = sorted(grouped.keys())
-        selected = self._select_snapshot_dates(sorted_dates, freq)
-        return [self._snapshot_payload(day, grouped[day]) for day in selected]
+        snapshots: List[Dict[str, Any]] = []
+        backend = self._get_backend_strategy()
+
+        for source in ("SBI", "RBI"):
+            if source == "RBI":
+                enforce_rbi_min_date(from_date, to_date)
+            rows = backend.fetch_range(from_date, to_date, source=source)
+            grouped = self._group_rows_by_date(rows)
+            if not grouped:
+                continue
+            sorted_dates = sorted(grouped.keys())
+            selected = self._select_snapshot_dates(sorted_dates, freq)
+            snapshots.extend(
+                [self._snapshot_payload(day, grouped[day], source) for day in selected]
+            )
+
+        return snapshots
+
+    def historical(
+        self,
+        from_date: date,
+        to_date: date,
+        frequency: Literal["daily", "weekly", "monthly", "yearly"] = "daily",
+    ) -> List[Dict[str, Any]]:
+        """Alias for :meth:`history` for readability."""
+
+        return self.history(from_date, to_date, frequency=frequency)
+
+    def rates(
+        self,
+        from_date: date,
+        to_date: date,
+        frequency: Literal["daily", "weekly", "monthly", "yearly"] = "daily",
+    ) -> List[Dict[str, Any]]:
+        """Deprecated alias; use :meth:`history` instead."""
+
+        warnings.warn(
+            "FxBharat.rates is deprecated; use FxBharat.history or FxBharat.historical instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.history(from_date, to_date, frequency=frequency)
 
     @staticmethod
     def _group_rows_by_date(
         rows: Iterable[ForexRateRecord],
-    ) -> Dict[date, Dict[str, float]]:
-        grouped: Dict[date, Dict[str, float]] = {}
+    ) -> Dict[date, List[ForexRateRecord]]:
+        grouped: Dict[date, List[ForexRateRecord]] = {}
         for row in rows:
-            bucket = grouped.setdefault(row.rate_date, {})
-            bucket[row.currency] = row.rate
+            grouped.setdefault(row.rate_date, []).append(row)
         return grouped
 
     @staticmethod
-    def _snapshot_payload(rate_date: date, rates: Dict[str, float]) -> Dict[str, Any]:
+    def _latest_snapshot_from_rows(
+        rows: Iterable[ForexRateRecord],
+        rate_date: date | None,
+        source: str,
+    ) -> Dict[str, Any] | None:
+        grouped = FxBharat._group_rows_by_date(rows)
+        if not grouped:
+            return None
+        target_date = rate_date if rate_date is not None else max(grouped.keys())
+        snapshot = grouped.get(target_date)
+        if snapshot is None:
+            return None
+        return FxBharat._snapshot_payload(target_date, snapshot, source)
+
+    @staticmethod
+    def _snapshot_payload(
+        rate_date: date, rates: List[ForexRateRecord], source: str
+    ) -> Dict[str, Any]:
+        ordered_rates: Dict[str, Any]
+        if source.upper() == "SBI":
+            payload_rates: Dict[str, Dict[str, float | None]] = {}
+            for row in rates:
+                payload_rates[row.currency] = {
+                    "rate": row.rate,
+                    "tt_buy": row.tt_buy,
+                    "tt_sell": row.tt_sell,
+                    "bill_buy": row.bill_buy,
+                    "bill_sell": row.bill_sell,
+                    "travel_card_buy": row.travel_card_buy,
+                    "travel_card_sell": row.travel_card_sell,
+                    "cn_buy": row.cn_buy,
+                    "cn_sell": row.cn_sell,
+                }
+            ordered_rates = dict(sorted(payload_rates.items()))
+        else:
+            ordered_rates = dict(sorted({row.currency: row.rate for row in rates}.items()))
+
         return {
             "rate_date": rate_date,
             "base_currency": "INR",
-            "rates": dict(sorted(rates.items())),
+            "source": source,
+            "rates": ordered_rates,
         }
 
     @staticmethod
