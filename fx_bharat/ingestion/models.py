@@ -14,3 +14,11 @@ class ForexRateRecord:
     currency: str
     rate: float
     source: str = "RBI"
+    tt_buy: float | None = None
+    tt_sell: float | None = None
+    bill_buy: float | None = None
+    bill_sell: float | None = None
+    travel_card_buy: float | None = None
+    travel_card_sell: float | None = None
+    cn_buy: float | None = None
+    cn_sell: float | None = None

@@ -36,8 +36,10 @@ class SQLiteBackend(BackendStrategy):
         self,
         start: date | None = None,
         end: date | None = None,
+        *,
+        source: str | None = None,
     ) -> list[ForexRateRecord]:
-        return self.manager.fetch_range(start, end)
+        return self.manager.fetch_range(start, end, source=source)
 
     def close(self) -> None:  # pragma: no cover - trivial delegator
         self.manager.close()
