@@ -84,6 +84,10 @@ Workflow:
 3. **pypdf** parses SBI's Forex Card PDF when you opt into the SBI source
 4. **SQLAlchemy or PyMongo** persist these rows into your configured backend
 
+> RBI sometimes blocks automated requests with HTTP 403/418. FxBharat now rotates between `www.rbi.org.in` and `rbi.org.in`,
+> refreshes sessions between attempts, and surfaces a clear error if the archive still rejects the request. When that happens,
+> retry with a smaller date window or download the Excel manually from the archive page and process it offline.
+
 The resulting dataset mirrors the RBI reference rates or SBI Forex card tables while keeping a `source` column to distinguish entries.
 
 ---

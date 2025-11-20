@@ -41,6 +41,7 @@ class RBIRequestsClient:
         date_format: str = "%d/%m/%Y",
         max_attempts: int = 5,
         backoff_seconds: float = 2.0,
+        archive_urls: Optional[list[str]] = None,
     ) -> None:
         self.download_dir = Path(download_dir) if download_dir else Path.cwd() / "rbi_downloads"
         self.download_dir.mkdir(parents=True, exist_ok=True)
@@ -49,6 +50,13 @@ class RBIRequestsClient:
         self.locators = RBIPageLocators()
         self.max_attempts = max_attempts
         self.backoff_seconds = backoff_seconds
+        self.archive_urls = archive_urls or [
+            "https://www.rbi.org.in/Scripts/ReferenceRateArchive.aspx",
+            "https://rbi.org.in/Scripts/ReferenceRateArchive.aspx",
+        ]
+        self._reset_session()
+
+    def _reset_session(self) -> None:
         import requests
 
         self.session = requests.Session()
@@ -56,7 +64,11 @@ class RBIRequestsClient:
             {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
                 "Referer": RBI_ARCHIVE_URL,
+                "Origin": "https://www.rbi.org.in",
             }
         )
 
@@ -66,27 +78,36 @@ class RBIRequestsClient:
         formatted_start = start_date.strftime(self.date_format)
         formatted_end = end_date.strftime(self.date_format)
 
-        response = self.session.get(RBI_ARCHIVE_URL, timeout=self.timeout)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
+        last_exc: Exception | None = None
+        for archive_url in self.archive_urls:
+            try:
+                response = self.session.get(archive_url, timeout=self.timeout)
+                self._raise_with_context(response, archive_url)
+                soup = BeautifulSoup(response.text, "html.parser")
 
-        hidden_fields = self._extract_hidden_fields(soup)
+                hidden_fields = self._extract_hidden_fields(soup)
 
-        payload = {
-            **hidden_fields,
-            self.locators.from_date_name: formatted_start,
-            self.locators.to_date_name: formatted_end,
-            self.locators.go_button_name: "Go",
-        }
+                payload = {
+                    **hidden_fields,
+                    self.locators.from_date_name: formatted_start,
+                    self.locators.to_date_name: formatted_end,
+                    self.locators.go_button_name: "Go",
+                }
 
-        post_response = self.session.post(
-            RBI_ARCHIVE_URL,
-            data=payload,
-            headers={"Referer": RBI_ARCHIVE_URL},
-            timeout=self.timeout,
-        )
-        post_response.raise_for_status()
-        return BeautifulSoup(post_response.text, "html.parser")
+                post_response = self.session.post(
+                    archive_url,
+                    data=payload,
+                    headers={"Referer": archive_url},
+                    timeout=self.timeout,
+                )
+                self._raise_with_context(post_response, archive_url)
+                return BeautifulSoup(post_response.text, "html.parser")
+            except Exception as exc:  # pragma: no cover - network dependent
+                last_exc = exc
+                LOGGER.debug("Failed to fetch RBI page via %s: %s", archive_url, exc)
+                continue
+
+        raise RuntimeError("Unable to reach RBI archive after trying all endpoints") from last_exc
 
     def fetch_excel(self, start_date: date, end_date: date) -> Path:
         """Download RBI reference rates Excel for the given date range."""
@@ -100,6 +121,9 @@ class RBIRequestsClient:
         last_error: Exception | None = None
         while attempt < self.max_attempts:
             attempt += 1
+            if attempt > 1:
+                # Start with a fresh session to avoid sticky anti-bot cookies between attempts.
+                self._reset_session()
             try:
                 result_soup = self._get_page_with_dates(start_date, end_date)
                 break
@@ -122,7 +146,7 @@ class RBIRequestsClient:
             raise RuntimeError(f"No Excel download link found for {start_date} – {end_date}")
 
         excel_response = self._trigger_download(result_soup, link_tag["href"])
-        excel_response.raise_for_status()
+        self._raise_with_context(excel_response, excel_response.url)
 
         filename = self._infer_filename(excel_response.headers.get("Content-Disposition", ""))
         final_path = self.download_dir / filename
@@ -155,6 +179,22 @@ class RBIRequestsClient:
     def _infer_filename(content_disposition: str) -> str:
         match = re.findall(r"filename=?\"?([^\"]+)\"?", content_disposition)
         return match[0] if match else "rbi_reference_rates.xls"
+
+    def _raise_with_context(self, response: "requests.Response", url: str) -> None:
+        import requests
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:  # pragma: no cover - network dependent
+            status = response.status_code
+            hints: list[str] = []
+            if status in {403, 418, 429}:
+                hints.append(
+                    "RBI is actively blocking automated downloads; wait a moment or try a smaller date window."
+                )
+                hints.append("Manual download from the RBI archive page may be required if blocking persists.")
+            hint_text = f" {' '.join(hints)}" if hints else ""
+            raise RuntimeError(f"RBI archive responded with HTTP {status} for {url}.{hint_text}") from exc
 
     @staticmethod
     def _extract_hidden_fields(soup: "BeautifulSoup") -> dict[str, str]:
