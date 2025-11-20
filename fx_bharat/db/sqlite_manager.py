@@ -6,7 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, Sequence, cast, Any
+from typing import TYPE_CHECKING, Any, Protocol, Sequence, cast
 
 from fx_bharat.db import DEFAULT_SQLITE_DB_PATH
 from fx_bharat.ingestion.models import ForexRateRecord

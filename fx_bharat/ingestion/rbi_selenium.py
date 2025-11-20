@@ -6,7 +6,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Optional, Sequence, TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Optional, Sequence, cast
 
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException
