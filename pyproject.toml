@@ -51,9 +51,25 @@ line_length = 100
 max-line-length = 120
 extend-ignore = ["E203", "W503"]
 
+[tool.pytest.ini_options]
+addopts = "--cov=fx_bharat --cov-report=term-missing --cov-fail-under=92"
+testpaths = ["tests"]
+
 [tool.mypy]
 python_version = "3.10"
 ignore_missing_imports = true
 warn_return_any = true
 warn_unused_configs = true
 exclude = ["tests/"]
+
+[tool.coverage.run]
+branch = true
+source = ["fx_bharat"]
+
+[tool.coverage.report]
+fail_under = 92
+show_missing = true
+skip_empty = true
+exclude_lines = [
+    "if __name__ == \"__main__\":",
+]
