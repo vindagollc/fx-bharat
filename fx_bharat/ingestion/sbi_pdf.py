@@ -14,6 +14,7 @@ from urllib.request import urlretrieve
 try:  # pragma: no cover - optional dependency
     from tenacity import RetryError, retry, stop_after_attempt, wait_exponential
 except ModuleNotFoundError:  # pragma: no cover - lightweight fallback
+
     class RetryError(Exception):
         pass
 
@@ -28,6 +29,7 @@ except ModuleNotFoundError:  # pragma: no cover - lightweight fallback
 
     def wait_exponential(*_: int, **__):  # type: ignore[no-redef]
         return None
+
 
 from fx_bharat.ingestion.models import ForexRateRecord
 from fx_bharat.utils.logger import get_logger
@@ -281,6 +283,7 @@ __all__ = ["SBI_FOREX_PDF_URL", "SBIPDFDownloader", "SBIPDFParser", "SBIPDFParse
 try:  # pragma: no cover - optional dependency
     from tenacity import RetryError, retry, stop_after_attempt, wait_exponential
 except ModuleNotFoundError:  # pragma: no cover - lightweight fallback
+
     class RetryError(Exception):
         pass
 
