@@ -15,10 +15,10 @@ try:  # pragma: no cover - optional dependency
     from pymongo.collection import Collection
     from pymongo.errors import PyMongoError
 except ModuleNotFoundError:  # pragma: no cover - handled dynamically
-    MongoClient = None  # type: ignore[assignment]
-    UpdateOne = None  # type: ignore[assignment]
-    Collection = None  # type: ignore[assignment]
-    PyMongoError = Exception  # type: ignore[assignment]
+    MongoClient = None  # type: ignore[misc, assignment]
+    UpdateOne = None  # type: ignore[misc, assignment]
+    Collection = None  # type: ignore[misc, assignment]
+    PyMongoError = Exception  # type: ignore[misc, assignment]
 
 LOGGER = get_logger(__name__)
 
@@ -30,7 +30,7 @@ class MongoBackend(BackendStrategy):
         if MongoClient is None:  # pragma: no cover - defensive
             raise ModuleNotFoundError("pymongo is required for MongoDB backends")
         self.url = url
-        self._client = MongoClient(url)
+        self._client: Any = MongoClient(url)
         db = self._client.get_default_database() if database is None else self._client[database]
         if db is None:
             raise ValueError("MongoDB connection URI must include a database name")

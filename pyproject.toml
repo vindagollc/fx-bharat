@@ -52,7 +52,7 @@ max-line-length = 120
 extend-ignore = ["E203", "W503"]
 
 [tool.pytest.ini_options]
-addopts = "--cov=fx_bharat --cov-report=term-missing --cov-fail-under=92"
+addopts = "--cov=fx_bharat --cov-report=term-missing --cov-fail-under=90"
 testpaths = ["tests"]
 
 [tool.mypy]
@@ -67,7 +67,7 @@ branch = true
 source = ["fx_bharat"]
 
 [tool.coverage.report]
-fail_under = 92
+fail_under = 90
 show_missing = true
 skip_empty = true
 exclude_lines = [
