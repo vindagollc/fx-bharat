@@ -6,7 +6,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Optional, Sequence, TYPE_CHECKING, cast
 
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException
@@ -15,24 +15,27 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support.ui import WebDriverWait
 
-try:  # pragma: no cover - optional dependency
+if TYPE_CHECKING:  # pragma: no cover - type checking only
     from tenacity import RetryError, retry, stop_after_attempt, wait_exponential
-except ModuleNotFoundError:  # pragma: no cover - lightweight fallback
+else:  # pragma: no cover - optional dependency
+    try:
+        from tenacity import RetryError, retry, stop_after_attempt, wait_exponential
+    except ModuleNotFoundError:
 
-    class RetryError(Exception):
-        pass
+        class RetryError(Exception):
+            pass
 
-    def retry(*args, **kwargs):  # type: ignore[no-redef]
-        def decorator(func):
-            return func
+        def retry(*args, **kwargs):  # type: ignore[no-redef]
+            def decorator(func):
+                return func
 
-        return decorator
+            return decorator
 
-    def stop_after_attempt(*_: int, **__):  # type: ignore[no-redef]
-        return None
+        def stop_after_attempt(*_: int, **__):  # type: ignore[no-redef]
+            return None
 
-    def wait_exponential(*_: int, **__):  # type: ignore[no-redef]
-        return None
+        def wait_exponential(*_: int, **__):  # type: ignore[no-redef]
+            return None
 
 
 from fx_bharat.utils.logger import get_logger
@@ -141,10 +144,13 @@ class RBISeleniumClient:
             raise ValueError("start date must not exceed end date")
 
         try:
-            downloaded_file = self._download_with_retries(start_date, end_date)
+            downloaded_file = cast(Path, self._download_with_retries(start_date, end_date))
         except RetryError as exc:  # pragma: no cover - selenium heavy
             LOGGER.error("Exhausted retries while downloading RBI data: %s", exc)
-            raise exc.last_attempt.exception()
+            last_exception = exc.last_attempt.exception()
+            if last_exception is not None:
+                raise last_exception
+            raise RuntimeError("RetryError raised without underlying exception")
         safe_start = start_date.isoformat()
         safe_end = end_date.isoformat()
         final_name = (
