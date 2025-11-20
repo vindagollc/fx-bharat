@@ -1,12 +1,18 @@
 # **fx-bharat**
 
 [![PyPI Version](https://img.shields.io/pypi/v/fx-bharat.svg)](https://pypi.org/project/fx-bharat/)
-[![PyPI Downloads](https://img.shields.io/pypi/dm/fx-bharat.svg)](https://pypi.org/project/fx-bharat/)
+[![Downloads](https://pepy.tech/badge/fx-bharat)](https://pepy.tech/project/fx-bharat)
 ![Wheel](https://img.shields.io/pypi/wheel/fx-bharat.svg)
 [![License](https://img.shields.io/pypi/l/fx-bharat.svg)](https://pypi.org/project/fx-bharat/)
 ![Status](https://img.shields.io/pypi/status/fx-bharat.svg)
 [![Python Versions](https://img.shields.io/pypi/pyversions/fx-bharat.svg)](https://pypi.org/project/fx-bharat/)
-
+![Typed](https://img.shields.io/badge/typed-yes-blue.svg)
+![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)
+![SQLite Included](https://img.shields.io/badge/database-SQLite-lightgrey)
+![isort](https://img.shields.io/badge/imports-isort-%2300aacd.svg)
+![flake8](https://img.shields.io/badge/flake8-enabled-blue.svg)
+![mypy](https://img.shields.io/badge/mypy-checked-2a6df4.svg)
+![CI](https://github.com/vindagollc/fx-bharat/actions/workflows/ci.yml/badge.svg)
 
 ---
 
@@ -14,7 +20,8 @@
 
 Every published wheel bundles historical forex data from:
 
-> **12/04/2022 → 18/11/2025**
+> RBI archive ingested from **12/04/2022 → 20/11/2025**
+> SBI Forex PDFs ingested from **01/01/2020 → 20/11/2025**
 
 so the package is **immediately useful** with no setup required.
 
@@ -112,7 +119,7 @@ pip install -e .
 fx_bharat/
     __init__.py               # FxBharat façade
     db/
-        forex.db              # Bundled SQLite snapshot (12/04/2022–18/11/2025)
+        forex.db              # Bundled SQLite snapshot
         base_backend.py       # Unified DB backend interface
         relational_backend.py # SQLAlchemy ORM helpers
         sqlite_backend.py     # SQLite adapter (default)

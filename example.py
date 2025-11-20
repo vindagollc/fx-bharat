@@ -42,8 +42,10 @@ print(history)
 # => [{'rate_date': date(2023, 12, 29), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # Seed today's RBI + SBI Forex Card rates and fetch the latest snapshot
-fx.seed(resource_dir="resources")
+fx.seed()
 print(fx.rate())
 
 # Seed historical RBI Forex rates for a specific window
-fx.seed_historical(from_date=date(2023, 1, 1), to_date=date(2023, 1, 31))
+fx.seed_historical(from_date=date(2020, 1, 1), to_date=date(2025, 11, 19), source="SBI")
+fx.seed_historical(from_date=date(2022, 4, 12), to_date=date(2025, 11, 19), source="RBI")
+#
