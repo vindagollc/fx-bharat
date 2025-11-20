@@ -1,0 +1,6 @@
+[run]
+source = fx_bharat
+
+[report]
+omit =
+    fx_bharat/ingestion/rbi_selenium.py

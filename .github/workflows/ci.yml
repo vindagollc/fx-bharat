@@ -1,0 +1,62 @@
+name: fx_bharat_ci
+
+on:
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run black
+        run: black --check fx_bharat/
+
+      - name: Run isort
+        run: isort --check-only fx_bharat/
+
+      - name: Run flake8
+        run: flake8 fx_bharat/
+
+      - name: Run mypy
+        run: mypy fx_bharat
+
+      - name: Run tests with coverage
+        run: |
+          coverage run --source=fx_bharat -m pytest
+          coverage report
+          coverage xml
+          coverage html
+
+      - name: Coverage threshold
+        run: |
+          coverage=$(coverage report | tail -1 | awk '{print $4}' | sed 's/%//')
+          echo "Coverage: $coverage"
+          if (( $(echo "$coverage < 90" | bc -l) )); then
+              echo "Coverage below required threshold of 90%"
+              exit 1
+          fi
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            htmlcov/
+          retention-days: 30
+
+
