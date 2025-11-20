@@ -125,3 +125,43 @@ def test_parser_reads_decimal_spacing_and_cn_from_pdf() -> None:
     assert usd.travel_card_sell == 86.24
     assert usd.cn_buy == 84.15
     assert usd.cn_sell == 86.55
+
+
+def test_sbi_parser_infers_date_from_filename_when_missing_date(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "2024-12-31.pdf"
+    pdf_path.write_text("USD 80 81 82 83 84 85 86 87")
+
+    parsed = SBIPDFParser().parse(pdf_path)
+
+    assert parsed.rate_date == date(2024, 12, 31)
+    usd = parsed.rates[0]
+    assert usd.currency == "USD"
+    assert (
+        usd.tt_buy,
+        usd.tt_sell,
+        usd.bill_buy,
+        usd.bill_sell,
+        usd.travel_card_buy,
+        usd.travel_card_sell,
+        usd.cn_buy,
+        usd.cn_sell,
+    ) == (80, 81, 82, 83, 84, 85, 86, 87)
+
+
+def test_sbi_parser_deduplicates_currency_rows(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "2024-02-01.pdf"
+    pdf_path.write_text(
+        """
+        Date: 01/02/2024
+        USD 83.11 84.11 83.01 84.21 82.91 84.31 82.71 84.51
+        USD 90.00 90.00 90.00 90.00 90.00 90.00 90.00 90.00
+        """
+    )
+
+    parsed = SBIPDFParser().parse(pdf_path)
+
+    usd_rows = [row for row in parsed.rates if row.currency == "USD"]
+    assert len(usd_rows) == 1
+    usd = usd_rows[0]
+    assert usd.rate_date == date(2024, 2, 1)
+    assert usd.tt_buy == 83.11
