@@ -132,17 +132,19 @@ class PersistenceResult:
 
 
 class _BackendProtocol(Protocol):
-    def insert_rates(
-        self, rows: Sequence[ForexRateRecord]
-    ) -> PersistenceResult: ...  # pragma: no cover - protocol definition
+    def insert_rates(self, rows: Sequence[ForexRateRecord]) -> PersistenceResult:
+        ...  # pragma: no cover - protocol definition
 
-    def fetch_all(self) -> list[ForexRateRecord]: ...  # pragma: no cover - protocol definition
+    def fetch_all(self) -> list[ForexRateRecord]:
+        ...  # pragma: no cover - protocol definition
 
     def fetch_range(
         self, start: date | None = None, end: date | None = None, *, source: str | None = None
-    ) -> list[ForexRateRecord]: ...  # pragma: no cover - protocol definition
+    ) -> list[ForexRateRecord]:
+        ...  # pragma: no cover - protocol definition
 
-    def close(self) -> None: ...  # pragma: no cover - protocol definition
+    def close(self) -> None:
+        ...  # pragma: no cover - protocol definition
 
 
 class _SQLAlchemyBackend:
