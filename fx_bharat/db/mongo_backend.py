@@ -86,12 +86,14 @@ class MongoBackend(BackendStrategy):
                 )
             )
         try:
-            rbi_collection = getattr(self, "_rbi_collection", None) or getattr(
-                self, "_collection", None
-            )
-            sbi_collection = getattr(self, "_sbi_collection", None) or getattr(
-                self, "_collection", None
-            )
+            rbi_collection = getattr(self, "_rbi_collection", None)
+            if rbi_collection is None:
+                rbi_collection = getattr(self, "_collection", None)
+
+            sbi_collection = getattr(self, "_sbi_collection", None)
+            if sbi_collection is None:
+                sbi_collection = getattr(self, "_collection", None)
+
             if rbi_ops and rbi_collection is not None:
                 rbi_collection.bulk_write(rbi_ops, ordered=False)
             if sbi_ops and sbi_collection is not None:
@@ -140,12 +142,13 @@ class MongoBackend(BackendStrategy):
             ]
 
         records: list[ForexRateRecord] = []
-        sbi_collection = getattr(self, "_sbi_collection", None) or getattr(
-            self, "_collection", None
-        )
-        rbi_collection = getattr(self, "_rbi_collection", None) or getattr(
-            self, "_collection", None
-        )
+        sbi_collection = getattr(self, "_sbi_collection", None)
+        if sbi_collection is None:
+            sbi_collection = getattr(self, "_collection", None)
+
+        rbi_collection = getattr(self, "_rbi_collection", None)
+        if rbi_collection is None:
+            rbi_collection = getattr(self, "_collection", None)
         if source is None or source.upper() == "SBI":
             if sbi_collection is not None:
                 records.extend(_collection_query(sbi_collection))
