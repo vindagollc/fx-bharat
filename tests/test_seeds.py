@@ -56,6 +56,9 @@ def test_seed_rbi_forex_coordinates_pipeline(
         def __exit__(self, exc_type, exc, tb) -> None:
             return None
 
+        def latest_rate_date(self, source: str):  # type: ignore[no-untyped-def]
+            return None
+
         def insert_rates(self, rows: List[ForexRateRecord]):
             inserted_rows.extend(rows)
             from fx_bharat.db.sqlite_manager import PersistenceResult
@@ -63,10 +66,9 @@ def test_seed_rbi_forex_coordinates_pipeline(
             return PersistenceResult(inserted=len(rows), updated=0)
 
     class DummyClient:
-        def __init__(self, *, download_dir: Path | None, headless: bool) -> None:
+        def __init__(self, *, download_dir: Path | None) -> None:
             self.download_dir = download_dir or tmp_path
             (self.download_dir).mkdir(parents=True, exist_ok=True)
-            self.headless = headless
 
         def __enter__(self) -> "DummyClient":
             return self
@@ -81,7 +83,7 @@ def test_seed_rbi_forex_coordinates_pipeline(
 
     monkeypatch.setattr(seeds_module, "RBIWorkbookConverter", lambda: DummyConverter())
     monkeypatch.setattr(seeds_module, "RBICSVParser", lambda: DummyParser())
-    monkeypatch.setattr(seeds_module, "RBISeleniumClient", DummyClient)
+    monkeypatch.setattr(seeds_module, "RBIRequestsClient", DummyClient)
     monkeypatch.setattr(seeds_module, "SQLiteManager", lambda db_path: DummyManager(Path(db_path)))
     monkeypatch.setattr(
         seeds_module,
@@ -99,6 +101,36 @@ def test_seed_rbi_forex_coordinates_pipeline(
 def test_seed_rbi_forex_rejects_dates_before_rbi_minimum(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="RBI do not provide the data before 12/04/2022"):
         seeds_module.seed_rbi_forex("2022-04-01", "2022-04-30", db_path=tmp_path / "fx.db")
+
+
+def test_seed_rbi_forex_dry_run_skips_download(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    class DummyManager:
+        def __init__(self, db_path: Path) -> None:
+            self.db_path = db_path
+
+        def __enter__(self) -> "DummyManager":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def latest_rate_date(self, source: str):  # type: ignore[no-untyped-def]
+            return None
+
+        def insert_rates(self, rows):  # type: ignore[no-untyped-def]
+            raise AssertionError("insert_rates should not be called in dry_run")
+
+    def _no_client(**kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("RBIRequestsClient should not be instantiated during dry_run")
+
+    monkeypatch.setattr(seeds_module, "SQLiteManager", lambda db_path: DummyManager(Path(db_path)))
+    monkeypatch.setattr(seeds_module, "RBIRequestsClient", _no_client)
+
+    result = seeds_module.seed_rbi_forex(
+        "2024-01-01", "2024-01-31", db_path=tmp_path / "fx.db", dry_run=True
+    )
+
+    assert result.total == 0
 
 
 def test_seeds_module_lazy_attribute(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -169,6 +201,7 @@ def test_main_invokes_seed_with_parsed_arguments(monkeypatch: pytest.MonkeyPatch
         db_path = "path.db"
         headless = True
         download_dir = None
+        dry_run = False
 
     monkeypatch.setattr(seeds_module, "parse_args", lambda: DummyNamespace)
     called: dict[str, tuple] = {}

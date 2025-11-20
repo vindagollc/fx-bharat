@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import argparse
+from datetime import timedelta
 from pathlib import Path
 
 from fx_bharat.db import DEFAULT_SQLITE_DB_PATH
 from fx_bharat.db.sqlite_manager import PersistenceResult, SQLiteManager
 from fx_bharat.ingestion.rbi_csv import RBICSVParser
-from fx_bharat.ingestion.rbi_selenium import RBISeleniumClient
+from fx_bharat.ingestion.rbi_requests import RBIRequestsClient
 from fx_bharat.ingestion.rbi_workbook import RBIWorkbookConverter
 from fx_bharat.utils.date_range import month_ranges, parse_date
 from fx_bharat.utils.logger import get_logger
@@ -34,9 +35,15 @@ def parse_args() -> argparse.Namespace:
         dest="headless",
         action="store_false",
         default=True,
-        help="Disable headless Chrome mode",
+        help="Deprecated: retained for compatibility (requests client ignores this flag)",
     )
     parser.add_argument("--download-dir", dest="download_dir", help="Optional download directory")
+    parser.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help="Preview operations without downloading or inserting rows",
+    )
     return parser.parse_args()
 
 
@@ -55,35 +62,73 @@ def seed_rbi_forex(
     end: str,
     *,
     db_path: str | Path = DEFAULT_SQLITE_DB_PATH,
-    headless: bool = True,
+    headless: bool | None = None,
     download_dir: str | Path | None = None,
+    dry_run: bool = False,
 ) -> PersistenceResult:
     """Seed RBI forex data between ``start`` and ``end`` dates."""
 
     start_date = parse_date(start)
     end_date = parse_date(end)
     enforce_rbi_min_date(start_date, end_date)
+    if headless is not None:
+        LOGGER.debug("Ignoring headless flag; RBI downloads now use requests instead of Selenium")
     converter = RBIWorkbookConverter()
     csv_parser = RBICSVParser()
     date_chunks = list(month_ranges(start_date, end_date))
     download_path = Path(download_dir) if download_dir else None
     total = PersistenceResult()
-    with RBISeleniumClient(download_dir=download_path, headless=headless) as client:
-        with SQLiteManager(db_path) as manager:
+    with SQLiteManager(db_path) as manager:
+        latest_ingested = manager.latest_rate_date("RBI")
+        if dry_run:
             for chunk in date_chunks:
-                LOGGER.info("Processing %s - %s", chunk.start, chunk.end)
-                excel_path = client.fetch_excel(chunk.start, chunk.end)
+                proposed_start = max(
+                    chunk.start,
+                    latest_ingested + timedelta(days=1) if latest_ingested else chunk.start,
+                )
+                if proposed_start > chunk.end:
+                    LOGGER.info(
+                        "[dry-run] skipping %s - %s (already ingested through %s)",
+                        chunk.start,
+                        chunk.end,
+                        latest_ingested,
+                    )
+                    continue
+                LOGGER.info(
+                    "[dry-run] would ingest RBI data for %s → %s",
+                    proposed_start,
+                    chunk.end,
+                )
+            return total
+
+        with RBIRequestsClient(download_dir=download_path) as client:
+            for chunk in date_chunks:
+                adjusted_start = max(
+                    chunk.start,
+                    latest_ingested + timedelta(days=1) if latest_ingested else chunk.start,
+                )
+                if adjusted_start > chunk.end:
+                    LOGGER.info(
+                        "Skipping %s - %s because data exists through %s",
+                        chunk.start,
+                        chunk.end,
+                        latest_ingested,
+                    )
+                    continue
+                LOGGER.info("Processing %s - %s", adjusted_start, chunk.end)
+                excel_path = client.fetch_excel(adjusted_start, chunk.end)
                 csv_path = converter.to_csv(
                     excel_path,
-                    start_date=chunk.start,
+                    start_date=adjusted_start,
                     end_date=chunk.end,
                     output_dir=client.download_dir,
                 )
                 csv_rows = csv_parser.parse(csv_path)
                 result = manager.insert_rates(csv_rows)
-                _log_chunk_result(f"Chunk {chunk.start} → {chunk.end}", result)
+                _log_chunk_result(f"Chunk {adjusted_start} → {chunk.end}", result)
                 total.inserted += result.inserted
                 total.updated += result.updated
+                latest_ingested = chunk.end
     LOGGER.info(
         "Seeding finished: inserted %s rows, updated %s rows (total %s)",
         total.inserted,
@@ -101,6 +146,7 @@ def main() -> None:
         db_path=args.db_path,
         headless=args.headless,
         download_dir=args.download_dir,
+        dry_run=args.dry_run,
     )
 
 

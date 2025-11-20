@@ -54,7 +54,7 @@ so the package is **immediately useful** with no setup required.
 
 FxBharat provides:
 
-* 🔄 Automated Selenium workflow to download daily reference rates
+* 🔄 Automated requests-based workflow to download daily reference rates
 * 📑 Parsing of RBI Excel/HTML into clean pandas DataFrames
 * 💾 Out-of-the-box storage via SQLite (bundled), PostgreSQL, MySQL/MariaDB, or MongoDB
 * 📈 Easy APIs to fetch latest rates or historical rollups
@@ -79,10 +79,14 @@ Coverage today:
 
 Workflow:
 
-1. **Selenium** downloads the RBI Excel/HTML reference rate workbook
-2. **BeautifulSoup4 + pandas** parse and normalize the data
+1. **Requests + BeautifulSoup4** simulate the RBI form submission and download the Excel workbook
+2. **pandas** parse and normalize the data
 3. **pypdf** parses SBI's Forex Card PDF when you opt into the SBI source
 4. **SQLAlchemy or PyMongo** persist these rows into your configured backend
+
+> RBI sometimes blocks automated requests with HTTP 403/418. FxBharat now rotates between `www.rbi.org.in` and `rbi.org.in`,
+> refreshes sessions between attempts, and surfaces a clear error if the archive still rejects the request. When that happens,
+> retry with a smaller date window or download the Excel manually from the archive page and process it offline.
 
 The resulting dataset mirrors the RBI reference rates or SBI Forex card tables while keeping a `source` column to distinguish entries.
 
@@ -98,9 +102,8 @@ pip install fx-bharat
 
 The installation includes:
 
-* Selenium
+* requests + BeautifulSoup4
 * pandas
-* BeautifulSoup4
 * SQLAlchemy
 * SQLite support
 
@@ -128,7 +131,7 @@ fx_bharat/
         mongo_backend.py      # MongoDB adapter via PyMongo
         sqlite_manager.py     # SQLite utilities + schema creation
     ingestion/
-        rbi_selenium.py       # Selenium automation
+        rbi_requests.py       # Requests-based RBI downloader (no Selenium)
         rbi_workbook.py       # HTML/Excel → DataFrame converter
         rbi_csv.py            # Intermediate CSV helpers
         sbi_pdf.py            # SBI Forex Card PDF parser
@@ -144,6 +147,38 @@ fx_bharat/
         logger.py             # Structured logging
         rbi.py                # RBI parsing constants
     py.typed                 # PEP 561 type hinting marker
+```
+
+---
+
+## **Database schema & ERD**
+
+The bundled SQLite snapshot exposes two tables. The schema is mirrored in [schema.sql](schema.sql).
+
+```mermaid
+erDiagram
+    forex_rates_rbi {
+        DATE rate_date PK
+        TEXT currency PK
+        REAL rate
+        TIMESTAMP created_at
+    }
+    forex_rates_sbi {
+        DATE rate_date PK
+        TEXT currency PK
+        REAL rate
+        REAL tt_buy
+        REAL tt_sell
+        REAL bill_buy
+        REAL bill_sell
+        REAL travel_card_buy
+        REAL travel_card_sell
+        REAL cn_buy
+        REAL cn_sell
+        TIMESTAMP created_at
+    }
+
+    forex_rates_rbi ||--|| forex_rates_sbi : "aligned by rate_date"
 ```
 
 ---
@@ -174,6 +209,9 @@ print(latest)
 # Get a specific day's snapshots (optional `rate_date`)
 print(fx.rate(rate_date=date(2025, 11, 1)))
 
+# Limit queries to a single source
+print(fx.rate(rate_date=date(2025, 11, 1), source_filter="RBI"))
+
 # Fetch a historical window
 history = fx.history(date(2025, 10, 1), date(2025, 10, 31), frequency="weekly")
 
@@ -183,14 +221,16 @@ for snapshot in history:
 
 ### What these methods do:
 
-* `.seed(start_date, end_date)` → Downloads & inserts missing entries
-* `.rate(rate_date=None)` → Returns **latest available** SBI and RBI observations (or specific `rate_date` snapshots) with SBI first
-* `.history(start, end, frequency)` → Supports
+* `.seed(start_date, end_date, dry_run=False)` → Downloads & inserts missing entries (incremental; `dry_run=True` only logs)
+* `.rate(rate_date=None, source_filter=None)` → Returns **latest available** SBI and RBI observations (or specific `rate_date` snapshots) with SBI first; filter with `source_filter="RBI"` or `"SBI"`
+* `.history(start, end, frequency, source_filter=None)` → Supports
 
   * `"daily"`
   * `"weekly"`
   * `"monthly"`
   * `"yearly"`
+
+  Yearly/monthly/weekly requests always return the last snapshot inside each bucket.
 
 > Legacy note: the former `.rates()` helper now lives on as a deprecated alias of `.history()`; new code should prefer `.history()` or `.historical()`.
 
@@ -202,7 +242,7 @@ for snapshot in history:
 from datetime import date
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.3.0
+print(FxBharat.__version__)  # 0.2.1
 
 # Default Usage
 fx = FxBharat()
@@ -233,6 +273,12 @@ fx.seed()
 ## Source Selection (RBI vs SBI)
 
 FxBharat now stores RBI and SBI data in **separate tables/collections**. Query helpers always return SBI snapshots first (when present) followed by RBI snapshots. Use `seed_historical(..., source="RBI" | "SBI")` to ingest archival PDFs for a specific source; `seed()` pulls both sources for the current day and saves the SBI PDF into `resources/`.
+
+**Tips:**
+
+* `source_filter` is available on `rate`, `history`, and `historical` to narrow results.
+* `seed`/`seed_rbi_forex`/`seed_sbi_historical` support `dry_run=True` to simulate work without writes.
+* Seeding is incremental; already ingested dates are skipped automatically per source.
 
 ## **2. Connecting to Your Own Database**
 
@@ -437,13 +483,21 @@ pytest
 To collect coverage with the built-in settings:
 
 ```bash
-pytest --cov=fx_bharat --cov-report=term-missing
-coverage report
+pytest --cov=fx_bharat --cov-report=term-missing --cov-report=xml
 ```
 
 If you prefer `coverage run`, make sure you do **not** also pass `--cov` to pytest; running both
 simultaneously can zero-out the generated `.coverage` file and lead to the 0% report seen in CI.
 
+
+---
+
+## Migration Guide: v0.2.x → v0.2.1+
+
+* Prefer `history`/`historical` over the deprecated `rates` alias.
+* Use the optional `source_filter` argument to explicitly request RBI-only or SBI-only results.
+* Seeding helpers support `dry_run=True` and skip already ingested dates using the stored latest snapshot per source.
+* Coverage now expects `pytest --cov=fx_bharat --cov-report=xml` in CI; avoid mixing `coverage run` with `--cov` flags.
 
 ---
 

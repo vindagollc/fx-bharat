@@ -414,6 +414,14 @@ def test_rate_rejects_dates_before_rbi_minimum(sqlite_fx: FxBharat) -> None:
         sqlite_fx.rate(date(2022, 4, 11))
 
 
+def test_rate_allows_source_filter(sqlite_fx: FxBharat) -> None:
+    _seed_sample_rates(sqlite_fx)
+    snapshots = sqlite_fx.rate(source_filter="RBI")
+    assert [snap["source"] for snap in snapshots] == ["RBI"]
+    with pytest.raises(ValueError):
+        sqlite_fx.rate(source_filter="NSE")
+
+
 def test_history_supports_frequency(sqlite_fx: FxBharat) -> None:
     _seed_sample_rates(sqlite_fx)
 

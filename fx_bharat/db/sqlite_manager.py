@@ -155,6 +155,9 @@ class _BackendProtocol(Protocol):
     ) -> list[ForexRateRecord]:
         ...  # pragma: no cover - protocol definition
 
+    def latest_rate_date(self, source: str) -> date | None:
+        ...  # pragma: no cover - protocol definition
+
     def close(self) -> None:
         ...  # pragma: no cover - protocol definition
 
@@ -283,6 +286,13 @@ class _SQLAlchemyBackend:
                         )
                     )
         return records
+
+    def latest_rate_date(self, source: str) -> date | None:
+        model = _SbiRate if source.upper() == "SBI" else _RbiRate
+        with self._SessionFactory() as session:
+            stmt = select(model.rate_date).order_by(model.rate_date.desc()).limit(1)
+            result = session.execute(stmt).scalar_one_or_none()
+        return cast(date | None, result)
 
     def close(self) -> None:  # pragma: no cover - trivial
         self.engine.dispose()
@@ -426,6 +436,18 @@ class _SQLiteFallbackBackend:
 
         return records
 
+    def latest_rate_date(self, source: str) -> date | None:
+        table = "forex_rates_sbi" if source.upper() == "SBI" else "forex_rates_rbi"
+        with self._connection:
+            cursor = self._connection.execute(
+                f"SELECT MAX(rate_date) as latest FROM {table}"
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        latest = row["latest"]
+        return date.fromisoformat(latest) if latest else None
+
     def close(self) -> None:  # pragma: no cover - trivial
         self._connection.close()
 
@@ -464,6 +486,9 @@ class SQLiteManager:
         source: str | None = None,
     ) -> list[ForexRateRecord]:
         return self._backend.fetch_range(start, end, source=source)
+
+    def latest_rate_date(self, source: str) -> date | None:
+        return self._backend.latest_rate_date(source)
 
     def close(self) -> None:  # pragma: no cover - trivial
         self._backend.close()

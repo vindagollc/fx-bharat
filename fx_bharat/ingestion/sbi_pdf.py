@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import tempfile
+import time
 import zlib
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -232,9 +233,17 @@ class SBIPDFParser:
 class SBIPDFDownloader:
     """Download the latest SBI forex PDF from the public endpoint."""
 
-    def __init__(self, download_dir: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        download_dir: str | Path | None = None,
+        *,
+        max_attempts: int = 3,
+        backoff_seconds: float = 2.0,
+    ) -> None:
         self.download_dir = Path(download_dir) if download_dir else Path(tempfile.mkdtemp())
         self.download_dir.mkdir(parents=True, exist_ok=True)
+        self.max_attempts = max_attempts
+        self.backoff_seconds = backoff_seconds
 
     def fetch_latest(self, destination: str | Path | None = None) -> Path:
         """Fetch the PDF and optionally persist it to ``destination``.
@@ -247,7 +256,24 @@ class SBIPDFDownloader:
         )
         destination_path.parent.mkdir(parents=True, exist_ok=True)
         LOGGER.info("Downloading SBI forex PDF to %s", destination_path)
-        urlretrieve(SBI_FOREX_PDF_URL, destination_path)
+        last_exception: Exception | None = None
+        for attempt in range(1, self.max_attempts + 1):
+            try:
+                urlretrieve(SBI_FOREX_PDF_URL, destination_path)
+                break
+            except Exception as exc:  # pragma: no cover - network errors are environment-specific
+                last_exception = exc
+                LOGGER.warning(
+                    "Attempt %s/%s to download SBI PDF failed: %s",
+                    attempt,
+                    self.max_attempts,
+                    exc,
+                )
+                if attempt == self.max_attempts:
+                    raise RuntimeError(
+                        "Unable to download SBI forex PDF after multiple attempts"
+                    ) from exc
+                time.sleep(self.backoff_seconds * attempt)
         return destination_path
 
 

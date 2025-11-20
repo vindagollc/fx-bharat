@@ -1,5 +1,5 @@
 # Runtime dependencies for fx_bharat
-selenium>=4.14
+requests>=2.31
 pandas>=2.1
 beautifulsoup4>=4.12
 SQLAlchemy>=2.0

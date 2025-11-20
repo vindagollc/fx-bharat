@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.1] - 2025-11-20
+### Added
+- Retry mechanism for ingestion  
+- Seed dry_run support  
+- Schema documentation  
+- Source filter for queries  
+- Yearly frequency cleanup  
+- Mermaid ER diagram and schema.sql  
+### Fixed
+- README inconsistencies  
+- Deprecated `.rates()` references  
+- Broken links & method typos  
+### Changed
+- Improved ingestion resilience
+- Incremental seeding
+- CI coverage setup
+- Replaced Selenium-based RBI downloader with a lightweight requests client (backward compatible alias)
+- Renamed the RBI ingestion module to `rbi_requests.py` to reflect the Selenium-free workflow
+- Hardened RBI downloads with session resets, alternate archive hosts, user-agent rotation, jittered backoff, and clearer errors when the RBI site blocks automation
+
 ## [0.2.0] - 2025-11-20
 ### Added
 - Added SBI Forex Card PDF ingestion and seeding utilities, including CLI and seed helpers.
