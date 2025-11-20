@@ -202,7 +202,7 @@ for snapshot in history:
 from datetime import date
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.3.0
+print(FxBharat.__version__)  # 0.2.1
 
 # Default Usage
 fx = FxBharat()

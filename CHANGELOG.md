@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.1] - 2025-11-20
+### Added
+- Retry mechanism for ingestion
+- Seed dry_run support
+- Schema documentation
+- Source filter for queries
+- Yearly frequency cleanup
+- Mermaid ER diagram and schema.sql
+### Fixed
+- README inconsistencies
+- Deprecated `.rates()` references
+- Broken links & method typos
+### Changed
+- Improved ingestion resilience
+- Incremental seeding
+- CI coverage setup
+
 ## [0.2.0] - 2025-11-20
 ### Added
 - Added SBI Forex Card PDF ingestion and seeding utilities, including CLI and seed helpers.
@@ -12,7 +29,6 @@
 - Declared new PDF parsing dependency and version bump for the release.
 ### Changed
 - Renamed the `rates` query helper to `history`/`historical` (with a deprecated `rates` alias for backward compatibility).
-
 
 ## [0.1.0] - 2025-11-19
 ### Added

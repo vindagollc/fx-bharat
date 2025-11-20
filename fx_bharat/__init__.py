@@ -50,7 +50,7 @@ __all__ = [
 try:
     __version__ = importlib_metadata.version("fx-bharat")
 except importlib_metadata.PackageNotFoundError:  # pragma: no cover - fallback for local runs
-    __version__ = "0.2.0"
+    __version__ = "0.2.1"
 
 
 def seed_rbi_forex(*args, **kwargs):
