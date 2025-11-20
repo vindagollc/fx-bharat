@@ -2,7 +2,7 @@ from datetime import date
 
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.1.0
+print(FxBharat.__version__)  # 0.2.0
 
 # Default Usage
 fx = FxBharat()
@@ -10,12 +10,12 @@ fx = FxBharat()
 # Latest Forex entry
 rate = fx.rate()
 print(rate)
-# => {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'rates': {'EUR': 102.7828, 'GBP': 116.5844, 'JPY': 57.15, 'USD': 88.6344}}
+# => {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
 
 # Specific Forex entry by date (optional rate_date)
 historical_rate = fx.rate(rate_date=date(2025, 11, 1))
 print(historical_rate)
-# => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'rates': {...}}
+# => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
 
 # weekly Forex entries
 rates = fx.rates(
@@ -23,8 +23,8 @@ rates = fx.rates(
     to_date=date.today(),
     frequency="daily",
 )
-print(rates)
-# => [{'rate_date': date(2025, 11, 3), 'rates': {...}}, ...]
+print(rates[:2])
+# => [{'rate_date': date(2025, 11, 3), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # monthly Forex entries
 rates = fx.rates(
@@ -33,7 +33,7 @@ rates = fx.rates(
     frequency="monthly",
 )
 print(rates)
-# => [{'rate_date': date(2025, 9, 30), 'rates': {...}}, ...]
+# => [{'rate_date': date(2025, 9, 30), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # yearly Forex entries
 rates = fx.rates(
@@ -42,6 +42,10 @@ rates = fx.rates(
     frequency="yearly",
 )
 print(rates)
-# => [{'rate_date': date(2023, 12, 29), 'rates': {...}}, ...]
+# => [{'rate_date': date(2023, 12, 29), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
+
+# Seed SBI Forex Card rates directly from the official PDF and fetch the latest snapshot
+fx.seed(from_date=date.today(), to_date=date.today(), source="SBI")
+print(fx.rate(source="SBI"))
 
 fx.seed(from_date=date.today(), to_date=date.today())

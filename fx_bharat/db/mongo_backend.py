@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Sequence
+from typing import Any, Sequence
 
 from fx_bharat.db.base_backend import BackendStrategy
 from fx_bharat.db.sqlite_manager import PersistenceResult
@@ -79,8 +79,10 @@ class MongoBackend(BackendStrategy):
         self,
         start: date | None = None,
         end: date | None = None,
+        *,
+        source: str | None = None,
     ) -> list[ForexRateRecord]:
-        query: dict[str, dict[str, str]] = {}
+        query: dict[str, Any] = {}
         if start is not None or end is not None:
             range_query: dict[str, str] = {}
             if start is not None:
@@ -88,6 +90,8 @@ class MongoBackend(BackendStrategy):
             if end is not None:
                 range_query["$lte"] = end.isoformat()
             query["rate_date"] = range_query
+        if source is not None:
+            query["source"] = source
         docs = self._collection.find(query).sort("rate_date", 1)
         return [
             ForexRateRecord(

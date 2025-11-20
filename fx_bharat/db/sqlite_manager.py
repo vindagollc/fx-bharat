@@ -84,19 +84,17 @@ class PersistenceResult:
 
 
 class _BackendProtocol(Protocol):
-    def insert_rates(self, rows: Sequence[ForexRateRecord]) -> PersistenceResult:
-        ...  # pragma: no cover - protocol definition
+    def insert_rates(
+        self, rows: Sequence[ForexRateRecord]
+    ) -> PersistenceResult: ...  # pragma: no cover - protocol definition
 
-    def fetch_all(self) -> list[ForexRateRecord]:
-        ...  # pragma: no cover - protocol definition
+    def fetch_all(self) -> list[ForexRateRecord]: ...  # pragma: no cover - protocol definition
 
     def fetch_range(
-        self, start: date | None = None, end: date | None = None
-    ) -> list[ForexRateRecord]:
-        ...  # pragma: no cover - protocol definition
+        self, start: date | None = None, end: date | None = None, *, source: str | None = None
+    ) -> list[ForexRateRecord]: ...  # pragma: no cover - protocol definition
 
-    def close(self) -> None:
-        ...  # pragma: no cover - protocol definition
+    def close(self) -> None: ...  # pragma: no cover - protocol definition
 
 
 class _SQLAlchemyBackend:
@@ -147,6 +145,8 @@ class _SQLAlchemyBackend:
         self,
         start: date | None = None,
         end: date | None = None,
+        *,
+        source: str | None = None,
     ) -> list[ForexRateRecord]:
         with self._SessionFactory() as session:
             stmt = select(_ForexRate).order_by(_ForexRate.rate_date)
@@ -154,6 +154,8 @@ class _SQLAlchemyBackend:
                 stmt = stmt.where(_ForexRate.rate_date >= start)
             if end is not None:
                 stmt = stmt.where(_ForexRate.rate_date <= end)
+            if source is not None:
+                stmt = stmt.where(_ForexRate.source == source)
             result = session.execute(stmt)
             records: list[ForexRateRecord] = []
             for row in result.scalars():
@@ -208,6 +210,8 @@ class _SQLiteFallbackBackend:
         self,
         start: date | None = None,
         end: date | None = None,
+        *,
+        source: str | None = None,
     ) -> list[ForexRateRecord]:
         clauses: list[str] = []
         params: list[str] = []
@@ -217,6 +221,9 @@ class _SQLiteFallbackBackend:
         if end is not None:
             clauses.append("rate_date <= ?")
             params.append(end.isoformat())
+        if source is not None:
+            clauses.append("source = ?")
+            params.append(source)
         where = ""
         if clauses:
             where = " WHERE " + " AND ".join(clauses)
@@ -269,8 +276,10 @@ class SQLiteManager:
         self,
         start: date | None = None,
         end: date | None = None,
+        *,
+        source: str | None = None,
     ) -> list[ForexRateRecord]:
-        return self._backend.fetch_range(start, end)
+        return self._backend.fetch_range(start, end, source=source)
 
     def close(self) -> None:  # pragma: no cover - trivial
         self._backend.close()

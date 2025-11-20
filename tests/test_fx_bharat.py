@@ -369,6 +369,7 @@ def test_rate_returns_latest_snapshot(sqlite_fx: FxBharat) -> None:
 
     assert snapshot["rate_date"] == date(2023, 2, 5)
     assert snapshot["base_currency"] == "INR"
+    assert snapshot["source"] == "RBI"
     assert snapshot["rates"] == {"EUR": 92.0, "USD": 85.0}
 
 
@@ -378,7 +379,25 @@ def test_rate_supports_specific_date(sqlite_fx: FxBharat) -> None:
     snapshot = sqlite_fx.rate(date(2023, 1, 2))
 
     assert snapshot["rate_date"] == date(2023, 1, 2)
+    assert snapshot["source"] == "RBI"
     assert snapshot["rates"] == {"USD": 83.0}
+
+
+def test_rate_filters_by_source(sqlite_fx: FxBharat) -> None:
+    _seed_sample_rates(sqlite_fx)
+    assert sqlite_fx.sqlite_manager is not None
+    sqlite_fx.sqlite_manager.insert_rates(
+        [
+            ForexRateRecord(rate_date=date(2023, 3, 1), currency="USD", rate=90.0, source="SBI"),
+            ForexRateRecord(rate_date=date(2023, 3, 1), currency="EUR", rate=95.0, source="SBI"),
+        ]
+    )
+
+    snapshot = sqlite_fx.rate(source="SBI")
+
+    assert snapshot["rate_date"] == date(2023, 3, 1)
+    assert snapshot["source"] == "SBI"
+    assert snapshot["rates"] == {"EUR": 95.0, "USD": 90.0}
 
 
 def test_rate_rejects_dates_before_rbi_minimum(sqlite_fx: FxBharat) -> None:

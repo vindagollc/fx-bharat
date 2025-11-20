@@ -96,6 +96,8 @@ class RelationalBackend(BackendStrategy):
         self,
         start: date | None = None,
         end: date | None = None,
+        *,
+        source: str | None = None,
     ) -> list[ForexRateRecord]:
         where_clauses: list[str] = []
         params: dict[str, object] = {}
@@ -105,6 +107,9 @@ class RelationalBackend(BackendStrategy):
         if end is not None:
             where_clauses.append("rate_date <= :end_date")
             params["end_date"] = end
+        if source:
+            where_clauses.append("source = :source")
+            params["source"] = source
         query = SELECT_SQL
         if where_clauses:
             query = (
