@@ -9,6 +9,7 @@ from enum import Enum
 from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Literal
+import warnings
 from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 from fx_bharat.db import DEFAULT_SQLITE_DB_PATH
@@ -360,7 +361,7 @@ class FxBharat:
             return {}
         return self._snapshot_payload(target_date, snapshot, source_upper)
 
-    def rates(
+    def history(
         self,
         from_date: date,
         to_date: date,
@@ -388,6 +389,35 @@ class FxBharat:
         sorted_dates = sorted(grouped.keys())
         selected = self._select_snapshot_dates(sorted_dates, freq)
         return [self._snapshot_payload(day, grouped[day], source.upper()) for day in selected]
+
+    def historical(
+        self,
+        from_date: date,
+        to_date: date,
+        frequency: Literal["daily", "weekly", "monthly", "yearly"] = "daily",
+        *,
+        source: str = "RBI",
+    ) -> List[Dict[str, Any]]:
+        """Alias for :meth:`history` for readability."""
+
+        return self.history(from_date, to_date, frequency=frequency, source=source)
+
+    def rates(
+        self,
+        from_date: date,
+        to_date: date,
+        frequency: Literal["daily", "weekly", "monthly", "yearly"] = "daily",
+        *,
+        source: str = "RBI",
+    ) -> List[Dict[str, Any]]:
+        """Deprecated alias; use :meth:`history` instead."""
+
+        warnings.warn(
+            "FxBharat.rates is deprecated; use FxBharat.history or FxBharat.historical instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.history(from_date, to_date, frequency=frequency, source=source)
 
     @staticmethod
     def _group_rows_by_date(

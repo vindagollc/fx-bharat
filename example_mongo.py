@@ -25,30 +25,30 @@ print(historical_rate)
 # => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
 
 # weekly Forex entries
-rates = fx.rates(
+history = fx.history(
     from_date=date(2025, 11, 1),
     to_date=date.today(),
     frequency="daily",
 )
-print(rates[:2])
+print(history[:2])
 # => [{'rate_date': date(2025, 11, 3), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # monthly Forex entries
-rates = fx.rates(
+history = fx.history(
     from_date=date(2025, 9, 1),
     to_date=date.today(),
     frequency="monthly",
 )
-print(rates)
+print(history)
 # => [{'rate_date': date(2025, 9, 30), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # yearly Forex entries
-rates = fx.rates(
+history = fx.history(
     from_date=date(2023, 9, 1),
     to_date=date.today(),
     frequency="yearly",
 )
-print(rates)
+print(history)
 # => [{'rate_date': date(2023, 12, 29), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # SBI Forex Card rates can also be mirrored into MongoDB after parsing the PDF

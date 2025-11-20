@@ -26,18 +26,18 @@ print(historical_rate)
 # => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
 
 # weekly Forex entries
-rates = fx.rates(from_date=date(2025, 11, 1), to_date=date.today(), frequency="daily")
-print(rates[:2])
+history = fx.history(from_date=date(2025, 11, 1), to_date=date.today(), frequency="daily")
+print(history[:2])
 # => [{'rate_date': date(2025, 11, 3), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # monthly Forex entries
-rates = fx.rates(from_date=date(2025, 9, 1), to_date=date.today(), frequency="monthly")
-print(rates)
+history = fx.history(from_date=date(2025, 9, 1), to_date=date.today(), frequency="monthly")
+print(history)
 # => [{'rate_date': date(2025, 9, 30), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # yearly Forex entries
-rates = fx.rates(from_date=date(2023, 9, 1), to_date=date.today(), frequency="yearly")
-print(rates)
+history = fx.history(from_date=date(2023, 9, 1), to_date=date.today(), frequency="yearly")
+print(history)
 # => [{'rate_date': date(2023, 12, 29), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # SBI Forex Card rates can also be mirrored into Postgres after parsing the PDF

@@ -160,7 +160,7 @@ print(latest)
 print(fx.rate(rate_date=date(2025, 11, 1)))
 
 # Fetch a historical window
-history = fx.rates(date(2025, 10, 1), date(2025, 10, 31), frequency="weekly")
+history = fx.history(date(2025, 10, 1), date(2025, 10, 31), frequency="weekly")
 
 for snapshot in history:
     print(snapshot["rate_date"], snapshot["source"], snapshot["rates"].get("USD"))
@@ -170,12 +170,14 @@ for snapshot in history:
 
 * `.seed(start_date, end_date)` → Downloads & inserts missing entries
 * `.rate(rate_date=None)` → Returns **latest available** FX observation (or a specific `rate_date` if provided)
-* `.rates(start, end, frequency)` → Supports
+* `.history(start, end, frequency)` → Supports
 
   * `"daily"`
   * `"weekly"`
   * `"monthly"`
   * `"yearly"`
+
+> Legacy note: the former `.rates()` helper now lives on as a deprecated alias of `.history()`; new code should prefer `.history()` or `.historical()`.
 
 ---
 
@@ -201,16 +203,16 @@ print(historical_rate)
 # => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
 
 # Daily Forex entries
-rates = fx.rates(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
+rates = fx.history(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
 print(rates[:2])
 # => [{'rate_date': datetime.date(2025, 11, 3), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # Monthly Forex entries
-monthly_rates = fx.rates(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
+monthly_rates = fx.history(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
 print(monthly_rates)
 
 # Yearly Forex entries
-yearly_rates = fx.rates(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
+yearly_rates = fx.history(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
 print(yearly_rates)
 
 fx.seed(from_date=date.today(), to_date=date.today())
@@ -241,7 +243,7 @@ fx.seed(
 print(fx.rate(source="SBI"))
 
 # Fetch RBI weekly snapshots (explicit source argument)
-print(fx.rates(date(2025, 10, 1), date(2025, 10, 31), frequency="weekly", source="RBI"))
+print(fx.history(date(2025, 10, 1), date(2025, 10, 31), frequency="weekly", source="RBI"))
 ```
 
 ## **2. Connecting to Your Own Database**
@@ -302,17 +304,17 @@ print(historical_rate)
 # => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
 
 # weekly Forex entries
-rates = fx.rates(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
+rates = fx.history(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
 print(rates[:2])
 # => [{'rate_date': datetime.date(2025, 11, 3), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # monthly Forex entries
-rates = fx.rates(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
+rates = fx.history(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
 print(rates)
 # => [{'rate_date': datetime.date(2025, 9, 30), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # yearly Forex entries
-rates = fx.rates(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
+rates = fx.history(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
 print(rates)
 # => [{'rate_date': datetime.date(2023, 12, 29), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
@@ -350,17 +352,17 @@ print(historical_rate)
 # => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
 
 # weekly Forex entries
-rates = fx.rates(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
+rates = fx.history(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
 print(rates[:2])
 # => [{'rate_date': datetime.date(2025, 11, 3), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # monthly Forex entries
-rates = fx.rates(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
+rates = fx.history(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
 print(rates)
 # => [{'rate_date': datetime.date(2025, 9, 30), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # yearly Forex entries
-rates = fx.rates(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
+rates = fx.history(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
 print(rates)
 # => [{'rate_date': datetime.date(2023, 12, 29), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
@@ -398,17 +400,17 @@ print(historical_rate)
 # => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
 
 # weekly Forex entries
-rates = fx.rates(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
+rates = fx.history(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
 print(rates[:2])
 # => [{'rate_date': datetime.date(2025, 11, 3), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # monthly Forex entries
-rates = fx.rates(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
+rates = fx.history(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
 print(rates)
 # => [{'rate_date': datetime.date(2025, 9, 30), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # yearly Forex entries
-rates = fx.rates(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
+rates = fx.history(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
 print(rates)
 # => [{'rate_date': datetime.date(2023, 12, 29), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 

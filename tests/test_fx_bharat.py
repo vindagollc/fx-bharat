@@ -405,10 +405,10 @@ def test_rate_rejects_dates_before_rbi_minimum(sqlite_fx: FxBharat) -> None:
         sqlite_fx.rate(date(2022, 4, 11))
 
 
-def test_rates_supports_frequency(sqlite_fx: FxBharat) -> None:
+def test_history_supports_frequency(sqlite_fx: FxBharat) -> None:
     _seed_sample_rates(sqlite_fx)
 
-    monthly = sqlite_fx.rates(date(2023, 1, 1), date(2023, 2, 28), frequency="monthly")
+    monthly = sqlite_fx.history(date(2023, 1, 1), date(2023, 2, 28), frequency="monthly")
 
     assert [entry["rate_date"] for entry in monthly] == [
         date(2023, 1, 8),
@@ -418,16 +418,16 @@ def test_rates_supports_frequency(sqlite_fx: FxBharat) -> None:
     assert monthly[1]["rates"]["EUR"] == 92.0
 
 
-def test_rates_validate_inputs(sqlite_fx: FxBharat) -> None:
+def test_history_validate_inputs(sqlite_fx: FxBharat) -> None:
     with pytest.raises(ValueError):
-        sqlite_fx.rates(date(2023, 2, 1), date(2023, 1, 1))
+        sqlite_fx.history(date(2023, 2, 1), date(2023, 1, 1))
     with pytest.raises(ValueError):
-        sqlite_fx.rates(date(2023, 1, 1), date(2023, 1, 2), frequency="hourly")  # type: ignore[arg-type]
+        sqlite_fx.history(date(2023, 1, 1), date(2023, 1, 2), frequency="hourly")  # type: ignore[arg-type]
 
 
-def test_rates_rejects_requests_before_rbi_minimum(sqlite_fx: FxBharat) -> None:
+def test_history_rejects_requests_before_rbi_minimum(sqlite_fx: FxBharat) -> None:
     with pytest.raises(ValueError, match="RBI do not provide the data before 12/04/2022"):
-        sqlite_fx.rates(date(2022, 4, 11), date(2022, 4, 20))
+        sqlite_fx.history(date(2022, 4, 11), date(2022, 4, 20))
 
 
 def test_migrate_requires_external_backend(sqlite_fx: FxBharat) -> None:
