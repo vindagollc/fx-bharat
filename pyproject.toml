@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fx-bharat"
+version = "0.1.0"
+description = "Ingestion utilities for downloading and storing RBI forex reference rates"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [{ name = "Anuj", email = "anuj.k@vindago.in" }]
+maintainers = [
+  { name = "Vindago Innovations LLC", email = "support@vindago.in" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "selenium>=4.14",
+    "pandas>=2.1",
+    "beautifulsoup4>=4.12",
+    "SQLAlchemy>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/vindagollc/fx-bharat"
+Company = "https://www.vindago.in/"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["fx_bharat*"]
+
+[tool.setuptools.package-data]
+fx_bharat = ["py.typed", "db/forex.db"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.flake8]
+max-line-length = 120
+extend-ignore = ["E203", "W503"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_return_any = true
+warn_unused_configs = true
