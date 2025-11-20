@@ -55,6 +55,22 @@ class SQLiteManagerTests(unittest.TestCase):
         self.assertEqual(len(feb_rows), 1)
         self.assertEqual(feb_rows[0].rate_date, date(2024, 2, 1))
 
+    def test_latest_rate_date_tracks_sources(self) -> None:
+        self.assertIsNone(self.manager.latest_rate_date("RBI"))
+        self.manager.insert_rates(
+            [
+                ForexRateRecord(rate_date=date(2024, 3, 1), currency="USD", rate=83.5),
+                ForexRateRecord(
+                    rate_date=date(2024, 3, 2),
+                    currency="USD",
+                    rate=90.1,
+                    source="SBI",
+                ),
+            ]
+        )
+        self.assertEqual(self.manager.latest_rate_date("RBI"), date(2024, 3, 1))
+        self.assertEqual(self.manager.latest_rate_date("SBI"), date(2024, 3, 2))
+
 
 class PersistenceResultTests(unittest.TestCase):
     def test_total_property_adds_inserted_and_updated(self) -> None:

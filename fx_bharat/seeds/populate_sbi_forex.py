@@ -55,6 +55,12 @@ def parse_args() -> argparse.Namespace:
         help="Do not fetch the latest PDF from SBI before inserting",
     )
     parser.set_defaults(download=False)
+    parser.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help="Preview which files would be parsed without inserting rows",
+    )
     return parser.parse_args()
 
 
@@ -80,6 +86,7 @@ def seed_sbi_historical(
     start: date | None = None,
     end: date | None = None,
     download: bool = True,
+    dry_run: bool = False,
 ) -> PersistenceResult:
     """Backfill SBI forex data from PDFs and optionally fetch the latest copy.
 
@@ -96,29 +103,54 @@ def seed_sbi_historical(
     resources_root = Path(resource_dir)
     pending: list[Path] = list(_iter_pdf_paths(resources_root, start, end))
     if download and start is None and end is None:
-        pending.append(downloader.fetch_latest())
+        if dry_run:
+            LOGGER.info("[dry-run] would download the latest SBI forex PDF")
+        else:
+            pending.append(downloader.fetch_latest())
 
     total = PersistenceResult()
     with SQLiteManager(db_path) as manager:
+        latest_ingested = manager.latest_rate_date("SBI")
         for pdf_path in pending:
             parsed = parser.parse(pdf_path)
+            if latest_ingested and parsed.rate_date <= latest_ingested:
+                LOGGER.info(
+                    "Skipping SBI PDF %s (already ingested through %s)",
+                    pdf_path,
+                    latest_ingested,
+                )
+                continue
+            if dry_run:
+                LOGGER.info(
+                    "[dry-run] would insert SBI rates for %s from %s",
+                    parsed.rate_date,
+                    pdf_path,
+                )
+                continue
             result = manager.insert_rates(parsed.rates)
             LOGGER.info(
                 "Inserted %s SBI rates for %s from %s", result.total, parsed.rate_date, pdf_path
             )
             total.inserted += result.inserted
             total.updated += result.updated
+            latest_ingested = parsed.rate_date
     return total
 
 
 def seed_sbi_today(
-    *, db_path: str | Path = DEFAULT_SQLITE_DB_PATH, resource_dir: str | Path = "resources"
+    *,
+    db_path: str | Path = DEFAULT_SQLITE_DB_PATH,
+    resource_dir: str | Path = "resources",
+    dry_run: bool = False,
 ) -> PersistenceResult:
     """Download today's SBI PDF, store it under ``resource_dir``, and insert rows."""
 
     parser = SBIPDFParser()
     resources_root = Path(resource_dir)
     downloader = SBIPDFDownloader(download_dir=resources_root)
+    if dry_run:
+        LOGGER.info("[dry-run] would download and insert today's SBI PDF")
+        return PersistenceResult()
     pdf_path = downloader.fetch_latest()
     parsed = parser.parse(pdf_path)
     dated_dir = resources_root / str(parsed.rate_date.year) / str(parsed.rate_date.month)
@@ -129,6 +161,14 @@ def seed_sbi_today(
 
     total = PersistenceResult()
     with SQLiteManager(db_path) as manager:
+        latest_ingested = manager.latest_rate_date("SBI")
+        if latest_ingested and parsed.rate_date <= latest_ingested:
+            LOGGER.info(
+                "Skipping SBI ingestion for %s because data exists through %s",
+                parsed.rate_date,
+                latest_ingested,
+            )
+            return total
         result = manager.insert_rates(parsed.rates)
         LOGGER.info(
             "Inserted %s SBI rates for %s from %s", result.total, parsed.rate_date, destination
@@ -154,6 +194,7 @@ def main() -> None:
         start=start_date,
         end=end_date,
         download=args.download,
+        dry_run=args.dry_run,
     )
 
 

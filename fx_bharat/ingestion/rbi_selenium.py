@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import time
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -60,6 +61,8 @@ class RBISeleniumClient:
         download_dir: Optional[Path] = None,
         headless: bool = True,
         timeout: int = 60,
+        max_attempts: int = 3,
+        retry_backoff: float = 2.0,
         locators: RBIPageLocators | None = None,
         date_format: str = "%d/%m/%Y",
         driver: webdriver.Chrome | None = None,
@@ -70,6 +73,8 @@ class RBISeleniumClient:
             self.download_dir = Path(download_dir)
         self.download_dir.mkdir(parents=True, exist_ok=True)
         self._owns_download_dir = False
+        self.max_attempts = max_attempts
+        self.retry_backoff = retry_backoff
         # RBI downloads can occasionally take longer than the initial page
         # interactions, so provide a generous default timeout while still
         # allowing callers to override it.
@@ -120,29 +125,46 @@ class RBISeleniumClient:
         if start_date > end_date:
             raise ValueError("start date must not exceed end date")
 
-        self.driver.get(RBI_ARCHIVE_URL)
-        wait = WebDriverWait(self.driver, self.timeout)
-        self._wait_for_page_ready(wait)
-        self._fill_date_field(wait, start_date, self.locators.from_date_locators)
-        self._fill_date_field(wait, end_date, self.locators.to_date_locators)
-        go_button = self._wait_for_clickable(wait, self.locators.go_button_locators)
-        self._click_via_js(go_button)
-        try:
-            download_link = self._wait_for_clickable(wait, self.locators.download_link_locators)
-        except TimeoutException as exc:  # pragma: no cover - requires selenium
-            LOGGER.error("Download link did not appear for %s - %s", start_date, end_date)
-            raise exc
-        self._click_via_js(download_link)
-        downloaded_file = self._wait_for_download()
-        safe_start = start_date.isoformat()
-        safe_end = end_date.isoformat()
-        final_name = (
-            f"rbi_reference_rates_{safe_start}_to_{safe_end}{downloaded_file.suffix.lower()}"
-        )
-        final_path = downloaded_file.with_name(final_name)
-        if downloaded_file != final_path:
-            downloaded_file.rename(final_path)
-        return final_path
+        last_exception: Exception | None = None
+        for attempt in range(1, self.max_attempts + 1):
+            try:
+                self.driver.get(RBI_ARCHIVE_URL)
+                wait = WebDriverWait(self.driver, self.timeout)
+                self._wait_for_page_ready(wait)
+                self._fill_date_field(wait, start_date, self.locators.from_date_locators)
+                self._fill_date_field(wait, end_date, self.locators.to_date_locators)
+                go_button = self._wait_for_clickable(wait, self.locators.go_button_locators)
+                self._click_via_js(go_button)
+                download_link = self._wait_for_clickable(
+                    wait, self.locators.download_link_locators
+                )
+                self._click_via_js(download_link)
+                downloaded_file = self._wait_for_download()
+                safe_start = start_date.isoformat()
+                safe_end = end_date.isoformat()
+                final_name = (
+                    f"rbi_reference_rates_{safe_start}_to_{safe_end}{downloaded_file.suffix.lower()}"
+                )
+                final_path = downloaded_file.with_name(final_name)
+                if downloaded_file != final_path:
+                    downloaded_file.rename(final_path)
+                return final_path
+            except (TimeoutException, NoSuchElementException, RuntimeError) as exc:
+                last_exception = exc
+                LOGGER.warning(
+                    "Attempt %s/%s to fetch RBI rates for %s-%s failed: %s",
+                    attempt,
+                    self.max_attempts,
+                    start_date,
+                    end_date,
+                    exc,
+                )
+                if attempt < self.max_attempts:
+                    time.sleep(self.retry_backoff * attempt)
+
+        raise TimeoutException(
+            f"Unable to download RBI forex rates for {start_date} to {end_date} after {self.max_attempts} attempts"
+        ) from last_exception
 
     def _fill_date_field(
         self,

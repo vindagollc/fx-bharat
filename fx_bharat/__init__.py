@@ -20,6 +20,7 @@ from fx_bharat.db.postgres_backend import PostgresBackend
 from fx_bharat.db.sqlite_backend import SQLiteBackend
 from fx_bharat.db.sqlite_manager import PersistenceResult, SQLiteManager
 from fx_bharat.ingestion.models import ForexRateRecord
+from fx_bharat.utils.logger import get_logger
 from fx_bharat.utils.rbi import enforce_rbi_min_date
 
 try:  # pragma: no cover - imported lazily
@@ -50,7 +51,10 @@ __all__ = [
 try:
     __version__ = importlib_metadata.version("fx-bharat")
 except importlib_metadata.PackageNotFoundError:  # pragma: no cover - fallback for local runs
-    __version__ = "0.2.0"
+    __version__ = "0.2.1"
+
+
+LOGGER = get_logger(__name__)
 
 
 def seed_rbi_forex(*args, **kwargs):
@@ -361,8 +365,14 @@ class FxBharat:
         self,
         *,
         resource_dir: str | Path | None = None,
+        dry_run: bool = False,
     ) -> None:
-        """Insert today's data for both RBI and SBI and mirror to external backends."""
+        """Insert today's data for both RBI and SBI and mirror to external backends.
+
+        When ``dry_run`` is True the method only logs the intended operations without
+        performing downloads or database writes. This is useful for CI and operational
+        dry-runs.
+        """
 
         today = date.today()
         sqlite_db_path = (
@@ -370,6 +380,12 @@ class FxBharat:
             if self.sqlite_manager is not None
             else DEFAULT_SQLITE_DB_PATH
         )
+
+        if dry_run:
+            LOGGER.info(
+                "[dry-run] would seed RBI and SBI data for %s into %s", today, sqlite_db_path
+            )
+            return
 
         seed_rbi_forex(today.isoformat(), today.isoformat(), db_path=sqlite_db_path)
         seed_sbi_today(
@@ -388,13 +404,23 @@ class FxBharat:
             target_backend.ensure_schema()
             target_backend.insert_rates(rows)
 
-    def rate(self, rate_date: date | None = None) -> List[Dict[str, Any]]:
-        """Return a forex rate snapshot for ``rate_date`` or the latest entry."""
+    def rate(
+        self,
+        rate_date: date | None = None,
+        *,
+        source_filter: str | Iterable[str] | None = None,
+    ) -> List[Dict[str, Any]]:
+        """Return a forex rate snapshot for ``rate_date`` or the latest entry.
+
+        ``source_filter`` controls which providers are consulted. Allowed values are
+        "RBI", "SBI", or "any"/``None`` for both.
+        """
 
         backend = self._get_backend_strategy()
         snapshots: List[Dict[str, Any]] = []
+        sources = self._resolve_sources(source_filter)
 
-        for source in ("SBI", "RBI"):
+        for source in sources:
             if rate_date is not None and source == "RBI":
                 enforce_rbi_min_date(rate_date)
             rows = (
@@ -413,6 +439,8 @@ class FxBharat:
         from_date: date,
         to_date: date,
         frequency: Literal["daily", "weekly", "monthly", "yearly"] = "daily",
+        *,
+        source_filter: str | Iterable[str] | None = None,
     ) -> List[Dict[str, Any]]:
         """Return forex rate snapshots within ``from_date``/``to_date``.
 
@@ -427,8 +455,9 @@ class FxBharat:
             raise ValueError("frequency must be one of: daily, weekly, monthly, yearly")
         snapshots: List[Dict[str, Any]] = []
         backend = self._get_backend_strategy()
+        sources = self._resolve_sources(source_filter)
 
-        for source in ("SBI", "RBI"):
+        for source in sources:
             if source == "RBI":
                 enforce_rbi_min_date(from_date, to_date)
             rows = backend.fetch_range(from_date, to_date, source=source)
@@ -448,16 +477,20 @@ class FxBharat:
         from_date: date,
         to_date: date,
         frequency: Literal["daily", "weekly", "monthly", "yearly"] = "daily",
+        *,
+        source_filter: str | Iterable[str] | None = None,
     ) -> List[Dict[str, Any]]:
         """Alias for :meth:`history` for readability."""
 
-        return self.history(from_date, to_date, frequency=frequency)
+        return self.history(from_date, to_date, frequency=frequency, source_filter=source_filter)
 
     def rates(
         self,
         from_date: date,
         to_date: date,
         frequency: Literal["daily", "weekly", "monthly", "yearly"] = "daily",
+        *,
+        source_filter: str | Iterable[str] | None = None,
     ) -> List[Dict[str, Any]]:
         """Deprecated alias; use :meth:`history` instead."""
 
@@ -466,7 +499,38 @@ class FxBharat:
             DeprecationWarning,
             stacklevel=2,
         )
-        return self.history(from_date, to_date, frequency=frequency)
+        return self.history(
+            from_date,
+            to_date,
+            frequency=frequency,
+            source_filter=source_filter,
+        )
+
+    @staticmethod
+    def _resolve_sources(source_filter: str | Iterable[str] | None) -> List[str]:
+        """Normalize user input into an ordered list of sources."""
+
+        default_order = ["SBI", "RBI"]
+        if source_filter is None:
+            return default_order
+
+        if isinstance(source_filter, str):
+            requested = [source_filter]
+        else:
+            requested = list(source_filter)
+
+        normalized: list[str] = []
+        for source in requested:
+            candidate = source.strip().upper()
+            if candidate in {"ANY", "ALL"}:
+                return default_order
+            if candidate not in {"RBI", "SBI"}:
+                raise ValueError(
+                    "source_filter must be one of 'RBI', 'SBI', 'any', or a combination of those values"
+                )
+            if candidate not in normalized:
+                normalized.append(candidate)
+        return normalized or default_order
 
     @staticmethod
     def _group_rows_by_date(
