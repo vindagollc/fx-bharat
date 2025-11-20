@@ -280,21 +280,3 @@ class SBIPDFDownloader:
 
 
 __all__ = ["SBI_FOREX_PDF_URL", "SBIPDFDownloader", "SBIPDFParser", "SBIPDFParseResult"]
-try:  # pragma: no cover - optional dependency
-    from tenacity import RetryError, retry, stop_after_attempt, wait_exponential
-except ModuleNotFoundError:  # pragma: no cover - lightweight fallback
-
-    class RetryError(Exception):
-        pass
-
-    def retry(*args, **kwargs):  # type: ignore[no-redef]
-        def decorator(func):
-            return func
-
-        return decorator
-
-    def stop_after_attempt(*_: int, **__):  # type: ignore[no-redef]
-        return None
-
-    def wait_exponential(*_: int, **__):  # type: ignore[no-redef]
-        return None
