@@ -495,7 +495,7 @@ def test_seed_mirrors_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch) 
         def __init__(self, db_path: Path | str, manager=None):  # type: ignore[no-untyped-def]
             self.db_path = Path(db_path)
             self.manager = manager
-            self.fetch_called_with: tuple[date | None, date | None] | None = None
+            self.fetch_called_with: tuple[date | None, date | None, str | None] | None = None
             self.closed = False
             self.rows = [
                 ForexRateRecord(rate_date=date(2023, 1, 1), currency="USD", rate=82.1),
@@ -503,8 +503,8 @@ def test_seed_mirrors_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch) 
             ]
             created_sqlite_backends.append(self)
 
-        def fetch_range(self, start=None, end=None):  # type: ignore[no-untyped-def]
-            self.fetch_called_with = (start, end)
+        def fetch_range(self, start=None, end=None, source=None):  # type: ignore[no-untyped-def]
+            self.fetch_called_with = (start, end, source)
             return list(self.rows)
 
         def close(self) -> None:
@@ -530,7 +530,7 @@ def test_seed_mirrors_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch) 
     assert isinstance(called["db_path"], Path)
     assert created_sqlite_backends
     sqlite_backend = created_sqlite_backends[0]
-    assert sqlite_backend.fetch_called_with == (date(2023, 1, 1), date(2023, 1, 2))
+    assert sqlite_backend.fetch_called_with == (date(2023, 1, 1), date(2023, 1, 2), "RBI")
     assert sqlite_backend.closed is True
 
     backend = external._backend_strategy

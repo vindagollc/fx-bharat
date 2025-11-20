@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import re
 import tempfile
+import zlib
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable
 from urllib.request import urlretrieve
-import zlib
 
 from fx_bharat.ingestion.models import ForexRateRecord
 from fx_bharat.utils.logger import get_logger
