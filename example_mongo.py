@@ -12,4 +12,4 @@ if not success:
     print(error)
     exit(1)
 
-fx.migrate()  # =>  will migrate the date from Sqlite to MongoDB
+fx.migrate()

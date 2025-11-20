@@ -1,50 +1,112 @@
 from datetime import date
-
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.2.1
+# Print installed package version
+print(FxBharat.__version__)
 
-# Default Usage
+# -------------------------------------------------------------
+# Instantiate FxBharat
+# -------------------------------------------------------------
+# When you create FxBharat() without arguments:
+# - It automatically loads the bundled forex SQLite database
+#   shipped with the package.
+# - It auto-loads RBI + SBI historical data up to the bundled
+#   cutoff date (e.g., 2022–2025 depending on package version).
+# - No internet connection is required unless you call `seed()`.
+# - This gives instant access to millions of rows of FX data.
 fx = FxBharat()
 
-# Latest Forex entries
+# -------------------------------------------------------------
+# Seed data
+# -------------------------------------------------------------
+# fx.seed()
+#
+# Use this to refresh or load new forex data from:
+#   - RBI (Reference Rate Archive, Excel files)
+#   - SBI (Forex card PDF/HTML pages)
+#
+# Notes:
+# - By default, seed() loads ALL missing dates up to today.
+# - You can override start_date and end_date manually.
+# - Selenium is not required anymore in your agent version.
+#
+# Recommended usage:
+#   fx.seed(start_date=date(2023,1,1), end_date=date(2024,12,31))
+#
+# Leave commented unless needed because seeding can take time.
+
+
+# -------------------------------------------------------------
+# 1. Get latest combined forex rates (RBI + SBI)
+# -------------------------------------------------------------
+# fx.rate() returns a LIST of structured dicts:
+# [
+#   {"date": <date>, "source": "rbi", "rates": {...}},
+#   {"date": <date>, "source": "sbi", "rates": {...}}
+# ]
+#
+# If both RBI and SBI have new data for today, you'll get 2 entries.
 rates = fx.rate()
-print(rates)
+for rate in rates:
+    # `.get('rates')` returns a dictionary:
+    #   {"USD": 83.12, "EUR": 90.45, ...}
+    print(rate.get('rates'))
 
-# Specific Forex entries by date (optional rate_date)
-historical_rates = fx.rate(rate_date=date(2025, 11, 1))
-print(historical_rates)
 
-# weekly Forex entries
+# -------------------------------------------------------------
+# 2. Latest RBI-only forex rates
+# -------------------------------------------------------------
+# Only retrieves the latest RBI reference rate available in DB.
+rates = fx.rate(source_filter="rbi")
+for rate in rates:
+    print(rate.get('rates'))
+
+
+# -------------------------------------------------------------
+# 3. Latest SBI-only forex rates
+# -------------------------------------------------------------
+# SBI sometimes publishes only a subset of currencies.
+# Useful if your workflow depends on forex card or remittance rates.
+rates = fx.rate(source_filter="sbi")
+for rate in rates:
+    print(rate.get('rates'))
+
+
+# -------------------------------------------------------------
+# 4. Get historical forex rates for a specific date
+# -------------------------------------------------------------
+# You can fetch exact-day rates (for both RBI and SBI) like this:
+rates = fx.rate(rate_date=date(2024, 2, 10))
+for rate in rates:
+    print(rate.get('rates'))
+# If the date is a weekend/holiday:
+# - RBI may not publish anything → empty result
+# - SBI may still publish → non-empty result
+
+
+# -------------------------------------------------------------
+# 5. Get historical forex ranges (Daily/Weekly/Monthly/Yearly)
+# -------------------------------------------------------------
+# fx.history() returns a LIST of dicts, one per entry:
+#   [
+#     {"date": <date>, "source": "rbi", "rates": {...}},
+#     {"date": <date>, "source": "rbi", "rates": {...}},
+#     ...
+#   ]
+#
+# frequency:
+#   - "daily"   → raw daily entries
+#   - "weekly"  → one entry per week (Monday-first or RBI-published)
+#   - "monthly" → month-end values
+#   - "yearly"  → year-end values
+#
+# TIP: "weekly" and "monthly" are perfect for charts and analytics.
 history = fx.history(
     from_date=date(2025, 11, 1),
     to_date=date.today(),
-    frequency="daily",
+    frequency="daily",  # or: weekly / monthly / yearly
+    source_filter="rbi" # Optional — defaults to all sources
 )
+
+# Print first 2 entries as a preview
 print(history[:2])
-
-# monthly Forex entries
-history = fx.history(
-    from_date=date(2025, 9, 1),
-    to_date=date.today(),
-    frequency="monthly",
-)
-print(history)
-# => [{'rate_date': date(2025, 9, 30), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
-
-# yearly Forex entries
-history = fx.history(
-    from_date=date(2023, 9, 1),
-    to_date=date.today(),
-    frequency="yearly",
-)
-print(history)
-# => [{'rate_date': date(2023, 12, 29), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
-
-# Seed today's RBI + SBI Forex Card rates and fetch the latest snapshot
-fx.seed()
-print(fx.rate())
-
-# Seed data for a specific window or source
-fx.seed(from_date=date(2020, 1, 1), to_date=date(2020, 12, 31), source="SBI")
-fx.seed(from_date=date(2022, 4, 12), to_date=date(2022, 12, 31), source="RBI")

@@ -16,8 +16,8 @@ LOGGER = get_logger(__name__)
 
 try:  # pragma: no cover - exercised indirectly
     from sqlalchemy import Column, Date, DateTime, Float, String, create_engine, select, text
-    from sqlalchemy.sql import func
     from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+    from sqlalchemy.sql import func
 except ModuleNotFoundError:  # pragma: no cover - fallback path
     SQLALCHEMY_AVAILABLE = False
 else:  # pragma: no cover - module import time
@@ -308,7 +308,11 @@ class _SQLAlchemyBackend:
         return records
 
     def latest_rate_date(self, source: str) -> date | None:
-        stmt = select(func.max(_SbiRate.rate_date) if source.upper() == "SBI" else func.max(_RbiRate.rate_date))
+        stmt = select(
+            func.max(_SbiRate.rate_date)
+            if source.upper() == "SBI"
+            else func.max(_RbiRate.rate_date)
+        )
         with self._SessionFactory() as session:
             result = session.execute(stmt).scalar_one_or_none()
         return cast(date | None, result)
@@ -322,9 +326,7 @@ class _SQLAlchemyBackend:
         with self._SessionFactory() as session:
             existing = session.get(_IngestionMetadata, source.upper())
             if existing is None:
-                session.add(
-                    _IngestionMetadata(source=source.upper(), last_ingested_date=rate_date)
-                )
+                session.add(_IngestionMetadata(source=source.upper(), last_ingested_date=rate_date))
             elif existing.last_ingested_date < rate_date:
                 existing.last_ingested_date = rate_date
             else:

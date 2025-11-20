@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
+from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webelement import WebElement
@@ -18,6 +18,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 try:  # pragma: no cover - optional dependency
     from tenacity import RetryError, retry, stop_after_attempt, wait_exponential
 except ModuleNotFoundError:  # pragma: no cover - lightweight fallback
+
     class RetryError(Exception):
         pass
 
@@ -32,6 +33,7 @@ except ModuleNotFoundError:  # pragma: no cover - lightweight fallback
 
     def wait_exponential(*_: int, **__):  # type: ignore[no-redef]
         return None
+
 
 from fx_bharat.utils.logger import get_logger
 
