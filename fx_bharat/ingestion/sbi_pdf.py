@@ -109,16 +109,33 @@ class SBIPDFParser:
             if not match:
                 continue
             groups = match.groups()
-            if idx == 0:
-                day, month, year = (int(groups[0]), int(groups[1]), int(groups[2]))
-            elif idx == 1:
-                year, month, day = (int(groups[0]), int(groups[1]), int(groups[2]))
-            else:
-                day, month, year = (int(groups[0]), int(groups[1]), int(groups[2]))
-            return date(year, month, day)
+            try:
+                if idx == 0:
+                    day, month, year = (
+                        int(groups[0]),
+                        int(groups[1]),
+                        int(groups[2]),
+                    )
+                elif idx == 1:
+                    year, month, day = (
+                        int(groups[0]),
+                        int(groups[1]),
+                        int(groups[2]),
+                    )
+                else:
+                    day, month, year = (
+                        int(groups[0]),
+                        int(groups[1]),
+                        int(groups[2]),
+                    )
+                return date(year, month, day)
+            except ValueError:
+                LOGGER.warning("Ignoring invalid date %s in %s", match.group(0), pdf_path)
+                continue
         try:
             return date.fromisoformat(Path(pdf_path).stem)
         except ValueError:
+            LOGGER.warning("Falling back to UTC date for %s", pdf_path)
             return datetime.utcnow().date()
 
     def _extract_rates(self, text: str, rate_date: date) -> Iterable[ForexRateRecord]:

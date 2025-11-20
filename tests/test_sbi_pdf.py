@@ -165,3 +165,20 @@ def test_sbi_parser_deduplicates_currency_rows(tmp_path: Path) -> None:
     usd = usd_rows[0]
     assert usd.rate_date == date(2024, 2, 1)
     assert usd.tt_buy == 83.11
+
+
+def test_sbi_parser_falls_back_to_filename_when_header_date_invalid(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "2020-10-12.pdf"
+    pdf_path.write_text(
+        """
+        Date: 20/20/2020
+        USD 80 81 82 83 84 85 86 87
+        """
+    )
+
+    parsed = SBIPDFParser().parse(pdf_path)
+
+    assert parsed.rate_date == date(2020, 10, 12)
+    usd = parsed.rates[0]
+    assert usd.currency == "USD"
+    assert usd.tt_buy == 80
