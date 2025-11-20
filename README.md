@@ -65,6 +65,11 @@ FxBharat retrieves daily *reference exchange rates* from:
 * 👉 **RBI Reference Rate Archive** — [https://www.rbi.org.in/Scripts/ReferenceRateArchive.aspx](https://www.rbi.org.in/Scripts/ReferenceRateArchive.aspx)
 * 👉 **SBI Forex Card Rates PDF** — [https://sbi.bank.in/documents/16012/1400784/FOREX_CARD_RATES.pdf](https://sbi.bank.in/documents/16012/1400784/FOREX_CARD_RATES.pdf)
 
+Coverage today:
+
+* RBI archive ingested from **12/04/2022 → 20/11/2025**
+* SBI Forex PDFs ingested from **01/01/2020 → 20/11/2025**
+
 Workflow:
 
 1. **Selenium** downloads the RBI Excel/HTML reference rate workbook
