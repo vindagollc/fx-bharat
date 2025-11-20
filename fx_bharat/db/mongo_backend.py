@@ -58,6 +58,17 @@ class MongoBackend(BackendStrategy):
                 "source": row.source,
                 "created_at": datetime.utcnow(),
             }
+            optional_fields = {
+                "tt_buy": row.tt_buy,
+                "tt_sell": row.tt_sell,
+                "bill_buy": row.bill_buy,
+                "bill_sell": row.bill_sell,
+                "travel_card_buy": row.travel_card_buy,
+                "travel_card_sell": row.travel_card_sell,
+            }
+            for key, value in optional_fields.items():
+                if value is not None:
+                    doc[key] = value
             bulk_ops.append(
                 UpdateOne(
                     {
@@ -99,6 +110,12 @@ class MongoBackend(BackendStrategy):
                 currency=doc["currency_code"],
                 rate=float(doc["rate"]),
                 source=doc.get("source", "RBI"),
+                tt_buy=doc.get("tt_buy"),
+                tt_sell=doc.get("tt_sell"),
+                bill_buy=doc.get("bill_buy"),
+                bill_sell=doc.get("bill_sell"),
+                travel_card_buy=doc.get("travel_card_buy"),
+                travel_card_sell=doc.get("travel_card_sell"),
             )
             for doc in docs
         ]

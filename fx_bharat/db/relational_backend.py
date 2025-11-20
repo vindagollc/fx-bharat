@@ -29,6 +29,12 @@ CREATE TABLE IF NOT EXISTS forex_rates (
     currency_code VARCHAR(3) NOT NULL,
     rate NUMERIC(18, 6) NOT NULL,
     base_currency VARCHAR(3) NOT NULL DEFAULT 'INR',
+    tt_buy NUMERIC(18, 6) NULL,
+    tt_sell NUMERIC(18, 6) NULL,
+    bill_buy NUMERIC(18, 6) NULL,
+    bill_sell NUMERIC(18, 6) NULL,
+    travel_card_buy NUMERIC(18, 6) NULL,
+    travel_card_sell NUMERIC(18, 6) NULL,
     source VARCHAR(255) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(rate_date, currency_code)
@@ -39,10 +45,13 @@ DELETE_SQL = (
     "DELETE FROM forex_rates WHERE rate_date = :rate_date AND currency_code = :currency_code"
 )
 INSERT_SQL = """
-INSERT INTO forex_rates(rate_date, currency_code, rate, base_currency, source, created_at)
-VALUES(:rate_date, :currency_code, :rate, :base_currency, :source, :created_at)
+INSERT INTO forex_rates(rate_date, currency_code, rate, base_currency, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell, source, created_at)
+VALUES(:rate_date, :currency_code, :rate, :base_currency, :tt_buy, :tt_sell, :bill_buy, :bill_sell, :travel_card_buy, :travel_card_sell, :source, :created_at)
 """
-SELECT_SQL = "SELECT rate_date, currency_code, rate, source FROM forex_rates ORDER BY rate_date"
+SELECT_SQL = (
+    "SELECT rate_date, currency_code, rate, source, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell "
+    "FROM forex_rates ORDER BY rate_date"
+)
 
 
 class RelationalBackend(BackendStrategy):
@@ -84,6 +93,12 @@ class RelationalBackend(BackendStrategy):
                     "currency_code": row.currency,
                     "rate": row.rate,
                     "base_currency": "INR",
+                    "tt_buy": row.tt_buy,
+                    "tt_sell": row.tt_sell,
+                    "bill_buy": row.bill_buy,
+                    "bill_sell": row.bill_sell,
+                    "travel_card_buy": row.travel_card_buy,
+                    "travel_card_sell": row.travel_card_sell,
                     "source": row.source,
                     "created_at": datetime.utcnow(),
                 }
@@ -113,7 +128,7 @@ class RelationalBackend(BackendStrategy):
         query = SELECT_SQL
         if where_clauses:
             query = (
-                "SELECT rate_date, currency_code, rate, source FROM forex_rates WHERE "
+                "SELECT rate_date, currency_code, rate, source, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell FROM forex_rates WHERE "
                 + " AND ".join(where_clauses)
                 + " ORDER BY rate_date"
             )
@@ -128,6 +143,12 @@ class RelationalBackend(BackendStrategy):
                     currency=row[1],
                     rate=float(row[2]),
                     source=row[3],
+                    tt_buy=row[4],
+                    tt_sell=row[5],
+                    bill_buy=row[6],
+                    bill_sell=row[7],
+                    travel_card_buy=row[8],
+                    travel_card_sell=row[9],
                 )
                 for row in rows
             ]

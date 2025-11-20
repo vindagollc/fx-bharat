@@ -32,6 +32,12 @@ else:  # pragma: no cover - module import time
         currency = Column(String, primary_key=True)
         rate = Column(Float, nullable=False)
         source = Column(String, nullable=False, default="RBI")
+        tt_buy = Column(Float, nullable=True)
+        tt_sell = Column(Float, nullable=True)
+        bill_buy = Column(Float, nullable=True)
+        bill_sell = Column(Float, nullable=True)
+        travel_card_buy = Column(Float, nullable=True)
+        travel_card_sell = Column(Float, nullable=True)
         created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
 
 
@@ -51,20 +57,32 @@ CREATE TABLE IF NOT EXISTS forex_rates (
     currency TEXT NOT NULL,
     rate REAL NOT NULL,
     source TEXT NOT NULL DEFAULT 'RBI',
+    tt_buy REAL,
+    tt_sell REAL,
+    bill_buy REAL,
+    bill_sell REAL,
+    travel_card_buy REAL,
+    travel_card_sell REAL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(rate_date, currency)
 );
 """
 
 INSERT_IGNORE_STATEMENT = """
-INSERT OR IGNORE INTO forex_rates(rate_date, currency, rate, source)
-VALUES(?, ?, ?, ?);
+INSERT OR IGNORE INTO forex_rates(rate_date, currency, rate, source, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 """
 
 UPDATE_STATEMENT = """
 UPDATE forex_rates
 SET rate = ?,
-    source = ?
+    source = ?,
+    tt_buy = ?,
+    tt_sell = ?,
+    bill_buy = ?,
+    bill_sell = ?,
+    travel_card_buy = ?,
+    travel_card_sell = ?
 WHERE rate_date = ? AND currency = ?;
 """
 
@@ -128,12 +146,24 @@ class _SQLAlchemyBackend:
                             currency=row.currency,
                             rate=row.rate,
                             source=row.source,
+                            tt_buy=row.tt_buy,
+                            tt_sell=row.tt_sell,
+                            bill_buy=row.bill_buy,
+                            bill_sell=row.bill_sell,
+                            travel_card_buy=row.travel_card_buy,
+                            travel_card_sell=row.travel_card_sell,
                         )
                     )
                     result.inserted += 1
                 else:
                     setattr(existing, "rate", row.rate)
                     setattr(existing, "source", row.source)
+                    setattr(existing, "tt_buy", row.tt_buy)
+                    setattr(existing, "tt_sell", row.tt_sell)
+                    setattr(existing, "bill_buy", row.bill_buy)
+                    setattr(existing, "bill_sell", row.bill_sell)
+                    setattr(existing, "travel_card_buy", row.travel_card_buy)
+                    setattr(existing, "travel_card_sell", row.travel_card_sell)
                     result.updated += 1
             session.commit()
         return result
@@ -166,6 +196,12 @@ class _SQLAlchemyBackend:
                         currency=cast(str, model.currency),
                         rate=cast(float, model.rate),
                         source=cast(str, model.source),
+                        tt_buy=cast(float | None, model.tt_buy),
+                        tt_sell=cast(float | None, model.tt_sell),
+                        bill_buy=cast(float | None, model.bill_buy),
+                        bill_sell=cast(float | None, model.bill_sell),
+                        travel_card_buy=cast(float | None, model.travel_card_buy),
+                        travel_card_sell=cast(float | None, model.travel_card_sell),
                     )
                 )
             return records
@@ -191,14 +227,36 @@ class _SQLiteFallbackBackend:
             for row in rows:
                 inserted = self._connection.execute(
                     INSERT_IGNORE_STATEMENT,
-                    (row.rate_date.isoformat(), row.currency, row.rate, row.source),
+                    (
+                        row.rate_date.isoformat(),
+                        row.currency,
+                        row.rate,
+                        row.source,
+                        row.tt_buy,
+                        row.tt_sell,
+                        row.bill_buy,
+                        row.bill_sell,
+                        row.travel_card_buy,
+                        row.travel_card_sell,
+                    ),
                 ).rowcount
                 if inserted:
                     result.inserted += inserted
                     continue
                 updated = self._connection.execute(
                     UPDATE_STATEMENT,
-                    (row.rate, row.source, row.rate_date.isoformat(), row.currency),
+                    (
+                        row.rate,
+                        row.source,
+                        row.tt_buy,
+                        row.tt_sell,
+                        row.bill_buy,
+                        row.bill_sell,
+                        row.travel_card_buy,
+                        row.travel_card_sell,
+                        row.rate_date.isoformat(),
+                        row.currency,
+                    ),
                 ).rowcount
                 result.updated += updated
         return result
@@ -228,7 +286,7 @@ class _SQLiteFallbackBackend:
         if clauses:
             where = " WHERE " + " AND ".join(clauses)
         query = (
-            "SELECT rate_date, currency, rate, source FROM forex_rates"
+            "SELECT rate_date, currency, rate, source, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell FROM forex_rates"
             f"{where} ORDER BY rate_date"
         )
         cursor = self._connection.execute(query, params)
@@ -238,6 +296,12 @@ class _SQLiteFallbackBackend:
                 currency=row["currency"],
                 rate=row["rate"],
                 source=row["source"],
+                tt_buy=row["tt_buy"],
+                tt_sell=row["tt_sell"],
+                bill_buy=row["bill_buy"],
+                bill_sell=row["bill_sell"],
+                travel_card_buy=row["travel_card_buy"],
+                travel_card_sell=row["travel_card_sell"],
             )
             for row in cursor.fetchall()
         ]

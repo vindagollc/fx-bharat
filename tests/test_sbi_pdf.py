@@ -14,9 +14,9 @@ def test_sbi_parser_extracts_rates(tmp_path: Path) -> None:
         """
         Forex Card Rates
         Date: 02/01/2024
-        USD 83.11
-        EURO 90.22
-        STERLING 101.33
+        USD 83.11 84.11 83.01 84.21 82.91 84.31
+        EURO 90.22 91.22 90.12 91.32 90.02 91.42
+        STERLING 101.33 102.33 101.23 102.43 101.13 102.53
         """
     )
     parser = SBIPDFParser()
@@ -24,8 +24,17 @@ def test_sbi_parser_extracts_rates(tmp_path: Path) -> None:
     parsed = parser.parse(pdf_path)
 
     assert parsed.rate_date == date(2024, 1, 2)
-    rates = {row.currency: row.rate for row in parsed.rates}
+    rates = {row.currency: row.tt_buy for row in parsed.rates}
     assert rates == {"USD": 83.11, "EUR": 90.22, "GBP": 101.33}
+    usd = next(row for row in parsed.rates if row.currency == "USD")
+    assert (
+        usd.tt_buy,
+        usd.tt_sell,
+        usd.bill_buy,
+        usd.bill_sell,
+        usd.travel_card_buy,
+        usd.travel_card_sell,
+    ) == (83.11, 84.11, 83.01, 84.21, 82.91, 84.31)
     assert {row.source for row in parsed.rates} == {"SBI"}
 
 
@@ -36,8 +45,8 @@ def test_seed_sbi_forex_populates_sqlite(tmp_path: Path) -> None:
     pdf_path.write_text(
         """
         05/01/2024
-        USD 83.5
-        AUD 55.0
+        USD 83.5 84.5 83.4 84.6 83.3 84.7
+        AUD 55.0 56.0 54.9 56.1 54.8 56.2
         """
     )
     db_path = tmp_path / "forex.db"
@@ -54,7 +63,10 @@ def test_seed_sbi_forex_populates_sqlite(tmp_path: Path) -> None:
 
     with SQLiteManager(db_path) as manager:
         rows = manager.fetch_range(source="SBI")
-    assert {(row.rate_date, row.currency, row.rate, row.source) for row in rows} == {
-        (date(2024, 1, 5), "USD", 83.5, "SBI"),
-        (date(2024, 1, 5), "AUD", 55.0, "SBI"),
+    assert {
+        (row.rate_date, row.currency, row.tt_buy, row.tt_sell, row.bill_buy, row.bill_sell)
+        for row in rows
+    } == {
+        (date(2024, 1, 5), "USD", 83.5, 84.5, 83.4, 84.6),
+        (date(2024, 1, 5), "AUD", 55.0, 56.0, 54.9, 56.1),
     }

@@ -50,6 +50,7 @@ class SBIPDFParser:
 
     _CURRENCY_PATTERN = re.compile(r"\b([A-Z]{3})\b\s+([0-9]+(?:\.[0-9]+)?)")
     _DATE_PATTERNS = (
+        re.compile(r"DATE\s*[:]?\s*(\d{2})[-/](\d{2})[-/](\d{4})"),
         re.compile(r"(\d{4})[-/](\d{2})[-/](\d{2})"),
         re.compile(r"(\d{2})[-/](\d{2})[-/](\d{4})"),
     )
@@ -81,11 +82,13 @@ class SBIPDFParser:
 
     def _infer_date(self, text: str, pdf_path: str | Path) -> date:
         for idx, pattern in enumerate(self._DATE_PATTERNS):
-            match = pattern.search(text)
+            match = pattern.search(text.upper())
             if not match:
                 continue
             groups = match.groups()
             if idx == 0:
+                day, month, year = (int(groups[0]), int(groups[1]), int(groups[2]))
+            elif idx == 1:
                 year, month, day = (int(groups[0]), int(groups[1]), int(groups[2]))
             else:
                 day, month, year = (int(groups[0]), int(groups[1]), int(groups[2]))
@@ -97,18 +100,53 @@ class SBIPDFParser:
 
     def _extract_rates(self, text: str, rate_date: date) -> Iterable[ForexRateRecord]:
         cleaned_text = re.sub(r"[,\t]+", " ", text.upper())
-        rates: dict[str, float] = {}
+        cleaned_text = re.sub(r" +", " ", cleaned_text)
+        lines = [line.strip() for line in cleaned_text.splitlines() if line.strip()]
 
-        for alias, code in self._CURRENCY_ALIAS_MAP.items():
-            name_pattern = re.compile(alias + r"\s+([0-9]+(?:\.[0-9]+)?)")
-            for match in name_pattern.finditer(cleaned_text):
-                rates[code] = float(match.group(1))
-
-        for code, rate in self._CURRENCY_PATTERN.findall(cleaned_text):
-            rates[code] = float(rate)
-
-        for code, rate in rates.items():
-            yield ForexRateRecord(rate_date=rate_date, currency=code, rate=rate, source="SBI")
+        for line in lines:
+            matched = False
+            for alias, code in self._CURRENCY_ALIAS_MAP.items():
+                if alias not in line:
+                    continue
+                numbers = [float(value) for value in re.findall(r"[0-9]+(?:\.[0-9]+)?", line)]
+                if len(numbers) < 6:
+                    continue
+                tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell = numbers[:6]
+                yield ForexRateRecord(
+                    rate_date=rate_date,
+                    currency=code,
+                    rate=tt_buy,
+                    source="SBI",
+                    tt_buy=tt_buy,
+                    tt_sell=tt_sell,
+                    bill_buy=bill_buy,
+                    bill_sell=bill_sell,
+                    travel_card_buy=travel_card_buy,
+                    travel_card_sell=travel_card_sell,
+                )
+                matched = True
+            if matched:
+                continue
+            code_match = re.match(r"([A-Z]{3})\b", line)
+            if not code_match:
+                continue
+            code = code_match.group(1)
+            numbers = [float(value) for value in re.findall(r"[0-9]+(?:\.[0-9]+)?", line)]
+            if len(numbers) < 6:
+                continue
+            tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell = numbers[:6]
+            yield ForexRateRecord(
+                rate_date=rate_date,
+                currency=code,
+                rate=tt_buy,
+                source="SBI",
+                tt_buy=tt_buy,
+                tt_sell=tt_sell,
+                bill_buy=bill_buy,
+                bill_sell=bill_sell,
+                travel_card_buy=travel_card_buy,
+                travel_card_sell=travel_card_sell,
+            )
 
 
 class SBIPDFDownloader:
