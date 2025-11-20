@@ -135,11 +135,16 @@ class SBIPDFParser:
         cleaned_text = re.sub(r" +", " ", cleaned_text)
         lines = [line.strip() for line in cleaned_text.splitlines() if line.strip()]
 
+        seen: set[str] = set()
+
         for line in lines:
             matched = False
             for alias, code in self._CURRENCY_ALIAS_MAP.items():
                 if alias not in line:
                     continue
+                if code in seen:
+                    matched = True
+                    break
                 numbers = [float(value) for value in re.findall(r"[0-9]+(?:\.[0-9]+)?", line)]
                 if len(numbers) < 8:
                     continue
@@ -167,6 +172,7 @@ class SBIPDFParser:
                     cn_buy=cn_buy,
                     cn_sell=cn_sell,
                 )
+                seen.add(code)
                 matched = True
             if matched:
                 continue
@@ -174,6 +180,8 @@ class SBIPDFParser:
             if not code_match:
                 continue
             code = code_match.group(1)
+            if code in seen:
+                continue
             numbers = [float(value) for value in re.findall(r"[0-9]+(?:\.[0-9]+)?", line)]
             if len(numbers) < 8:
                 continue
@@ -201,6 +209,7 @@ class SBIPDFParser:
                 cn_buy=cn_buy,
                 cn_sell=cn_sell,
             )
+            seen.add(code)
 
 
 class SBIPDFDownloader:

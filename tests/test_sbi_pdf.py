@@ -113,7 +113,9 @@ def test_parser_reads_decimal_spacing_and_cn_from_pdf() -> None:
 
     parsed = parser.parse(pdf_path)
 
-    usd = next(row for row in parsed.rates if row.currency == "USD")
+    usd_rows = [row for row in parsed.rates if row.currency == "USD"]
+    assert len(usd_rows) == 1
+    usd = usd_rows[0]
     assert parsed.rate_date == date(2025, 1, 1)
     assert usd.tt_buy == 85.22
     assert usd.tt_sell == 86.07
