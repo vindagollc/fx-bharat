@@ -1,0 +1,5 @@
+include README.md
+include LICENSE
+recursive-include fx_bharat *.py
+recursive-include fx_bharat/db forex.db
+include fx_bharat/py.typed
