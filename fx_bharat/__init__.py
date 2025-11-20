@@ -40,6 +40,8 @@ __all__ = [
     "FxBharat",
     "seed_rbi_forex",
     "seed_sbi_forex",
+    "seed_sbi_historical",
+    "seed_sbi_today",
     "SQLiteManager",
     "PersistenceResult",
     "RBISeleniumClient",
@@ -61,6 +63,18 @@ def seed_sbi_forex(*args, **kwargs):
     from fx_bharat.seeds.populate_sbi_forex import seed_sbi_forex as _seed_sbi_forex
 
     return _seed_sbi_forex(*args, **kwargs)
+
+
+def seed_sbi_historical(*args, **kwargs):
+    from fx_bharat.seeds.populate_sbi_forex import seed_sbi_historical as _seed_sbi_historical
+
+    return _seed_sbi_historical(*args, **kwargs)
+
+
+def seed_sbi_today(*args, **kwargs):
+    from fx_bharat.seeds.populate_sbi_forex import seed_sbi_today as _seed_sbi_today
+
+    return _seed_sbi_today(*args, **kwargs)
 
 
 class DatabaseBackend(str, Enum):
@@ -291,7 +305,7 @@ class FxBharat:
         target_backend.ensure_schema()
         target_backend.insert_rates(rows)
 
-    def seed(
+    def seed_historical(
         self,
         from_date: date,
         to_date: date,
@@ -300,7 +314,10 @@ class FxBharat:
         resource_dir: str | Path | None = None,
         download_latest: bool | None = None,
     ) -> None:
-        """Seed SQLite and mirror rows into the configured backend."""
+        """Seed SQLite and mirror rows into the configured backend using past data."""
+
+        if to_date >= date.today():
+            raise ValueError("Historical seeding requires `to_date` to be earlier than today")
 
         source_upper = source.upper()
         if source_upper == "RBI":
@@ -319,7 +336,7 @@ class FxBharat:
                 db_path=sqlite_db_path,
             )
         elif source_upper == "SBI":
-            seed_sbi_forex(
+            seed_sbi_historical(
                 db_path=sqlite_db_path,
                 resource_dir=resource_dir or Path("resources"),
                 start=from_date,
@@ -333,6 +350,37 @@ class FxBharat:
             sqlite_backend = SQLiteBackend(db_path=sqlite_db_path)
             try:
                 rows = sqlite_backend.fetch_range(from_date, to_date, source=source_upper)
+            finally:
+                sqlite_backend.close()
+
+            target_backend = self._get_backend_strategy()
+            target_backend.ensure_schema()
+            target_backend.insert_rates(rows)
+
+    def seed(
+        self,
+        *,
+        resource_dir: str | Path | None = None,
+    ) -> None:
+        """Insert today's data for both RBI and SBI and mirror to external backends."""
+
+        today = date.today()
+        sqlite_db_path = (
+            Path(self.sqlite_manager.db_path)
+            if self.sqlite_manager is not None
+            else DEFAULT_SQLITE_DB_PATH
+        )
+
+        seed_rbi_forex(today.isoformat(), today.isoformat(), db_path=sqlite_db_path)
+        seed_sbi_today(
+            db_path=sqlite_db_path,
+            resource_dir=resource_dir or Path("resources"),
+        )
+
+        if self.connection_info.is_external:
+            sqlite_backend = SQLiteBackend(db_path=sqlite_db_path)
+            try:
+                rows = sqlite_backend.fetch_range(today, today, source=None)
             finally:
                 sqlite_backend.close()
 

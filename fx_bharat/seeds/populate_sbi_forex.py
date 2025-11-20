@@ -14,7 +14,7 @@ from fx_bharat.utils.logger import get_logger
 
 LOGGER = get_logger(__name__)
 
-__all__ = ["seed_sbi_forex", "parse_args", "main"]
+__all__ = ["seed_sbi_forex", "seed_sbi_historical", "seed_sbi_today", "parse_args", "main"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -73,7 +73,7 @@ def _iter_pdf_paths(resource_dir: Path, start: date | None, end: date | None) ->
         yield path
 
 
-def seed_sbi_forex(
+def seed_sbi_historical(
     *,
     db_path: str | Path = DEFAULT_SQLITE_DB_PATH,
     resource_dir: str | Path = "resources",
@@ -81,7 +81,15 @@ def seed_sbi_forex(
     end: date | None = None,
     download: bool = True,
 ) -> PersistenceResult:
-    """Backfill SBI forex data from PDFs and optionally fetch the latest copy."""
+    """Backfill SBI forex data from PDFs and optionally fetch the latest copy.
+
+    ``end`` must be earlier than ``date.today()`` because this helper is intended for
+    historical ingestion rather than same-day updates.
+    """
+
+    today = date.today()
+    if end and end >= today:
+        raise ValueError("Historical seeding only supports dates earlier than today")
 
     parser = SBIPDFParser()
     downloader = SBIPDFDownloader()
@@ -103,11 +111,44 @@ def seed_sbi_forex(
     return total
 
 
+def seed_sbi_today(
+    *, db_path: str | Path = DEFAULT_SQLITE_DB_PATH, resource_dir: str | Path = "resources"
+) -> PersistenceResult:
+    """Download today's SBI PDF, store it under ``resource_dir``, and insert rows."""
+
+    parser = SBIPDFParser()
+    resources_root = Path(resource_dir)
+    downloader = SBIPDFDownloader(download_dir=resources_root)
+    pdf_path = downloader.fetch_latest()
+    parsed = parser.parse(pdf_path)
+    dated_dir = resources_root / str(parsed.rate_date.year) / str(parsed.rate_date.month)
+    dated_dir.mkdir(parents=True, exist_ok=True)
+    destination = dated_dir / f"{parsed.rate_date.isoformat()}.pdf"
+    if pdf_path.resolve() != destination.resolve():
+        destination.write_bytes(Path(pdf_path).read_bytes())
+
+    total = PersistenceResult()
+    with SQLiteManager(db_path) as manager:
+        result = manager.insert_rates(parsed.rates)
+        LOGGER.info(
+            "Inserted %s SBI rates for %s from %s", result.total, parsed.rate_date, destination
+        )
+        total.inserted += result.inserted
+        total.updated += result.updated
+    return total
+
+
+def seed_sbi_forex(*args, **kwargs) -> PersistenceResult:  # type: ignore[explicit-any]
+    """Backward compatible alias for :func:`seed_sbi_historical`."""
+
+    return seed_sbi_historical(*args, **kwargs)
+
+
 def main() -> None:
     args = parse_args()
     start_date = date.fromisoformat(args.start) if args.start else None
     end_date = date.fromisoformat(args.end) if args.end else None
-    seed_sbi_forex(
+    seed_sbi_historical(
         db_path=args.db_path,
         resource_dir=args.resource_dir,
         start=start_date,

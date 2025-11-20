@@ -236,11 +236,19 @@ class SBIPDFDownloader:
         self.download_dir = Path(download_dir) if download_dir else Path(tempfile.mkdtemp())
         self.download_dir.mkdir(parents=True, exist_ok=True)
 
-    def fetch_latest(self) -> Path:
-        destination = self.download_dir / Path(SBI_FOREX_PDF_URL).name
-        LOGGER.info("Downloading SBI forex PDF to %s", destination)
-        urlretrieve(SBI_FOREX_PDF_URL, destination)
-        return destination
+    def fetch_latest(self, destination: str | Path | None = None) -> Path:
+        """Fetch the PDF and optionally persist it to ``destination``.
+
+        When ``destination`` is omitted, the PDF is stored in ``download_dir``.
+        """
+
+        destination_path = (
+            Path(destination) if destination else self.download_dir / Path(SBI_FOREX_PDF_URL).name
+        )
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        LOGGER.info("Downloading SBI forex PDF to %s", destination_path)
+        urlretrieve(SBI_FOREX_PDF_URL, destination_path)
+        return destination_path
 
 
 __all__ = ["SBI_FOREX_PDF_URL", "SBIPDFDownloader", "SBIPDFParser", "SBIPDFParseResult"]

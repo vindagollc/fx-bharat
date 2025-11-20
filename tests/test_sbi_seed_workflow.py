@@ -4,7 +4,7 @@ from datetime import date
 from pathlib import Path
 
 from fx_bharat.db.sqlite_manager import SQLiteManager
-from fx_bharat.seeds.populate_sbi_forex import _iter_pdf_paths, seed_sbi_forex
+from fx_bharat.seeds.populate_sbi_forex import _iter_pdf_paths, seed_sbi_historical, seed_sbi_today
 
 
 def test_iter_pdf_paths_filters_by_range(tmp_path: Path) -> None:
@@ -41,7 +41,9 @@ def test_seed_sbi_forex_downloads_latest_when_enabled(monkeypatch, tmp_path: Pat
     monkeypatch.setattr("fx_bharat.seeds.populate_sbi_forex.SBIPDFDownloader", DummyDownloader)
 
     db_path = tmp_path / "db.sqlite"
-    result = seed_sbi_forex(db_path=db_path, resource_dir=tmp_path / "resources", download=True)
+    result = seed_sbi_historical(
+        db_path=db_path, resource_dir=tmp_path / "resources", download=True
+    )
 
     assert calls["fetch"] == 1
     assert result.inserted == 1
@@ -51,3 +53,37 @@ def test_seed_sbi_forex_downloads_latest_when_enabled(monkeypatch, tmp_path: Pat
     usd = rows[0]
     assert usd.rate_date == date(2024, 2, 2)
     assert usd.tt_buy == 84.0
+
+
+def test_seed_sbi_today_downloads_and_persists(monkeypatch, tmp_path: Path) -> None:
+    today_pdf = tmp_path / "temp.pdf"
+    today_pdf.write_text(
+        """
+        Date: 01/01/2025
+        USD 85.22 86.07 85.15 86.24 85.15 86.24 84.15 86.55
+        """
+    )
+
+    class DummyDownloader:
+        def __init__(self, download_dir: Path | str | None = None) -> None:
+            self.download_dir = Path(download_dir) if download_dir else tmp_path
+
+        def fetch_latest(self, destination: Path | None = None) -> Path:
+            dest = destination or self.download_dir / "FOREX_CARD_RATES.pdf"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(today_pdf.read_bytes())
+            return dest
+
+    monkeypatch.setattr("fx_bharat.seeds.populate_sbi_forex.SBIPDFDownloader", DummyDownloader)
+
+    resources_dir = tmp_path / "resources"
+    db_path = tmp_path / "db.sqlite"
+    result = seed_sbi_today(db_path=db_path, resource_dir=resources_dir)
+
+    assert result.inserted == 1
+    stored = resources_dir / "2025" / "1" / "2025-01-01.pdf"
+    assert stored.exists()
+    with SQLiteManager(db_path) as manager:
+        rows = manager.fetch_range(source="SBI")
+    assert len(rows) == 1
+    assert rows[0].rate_date == date(2025, 1, 1)

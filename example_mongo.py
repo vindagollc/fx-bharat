@@ -52,7 +52,7 @@ print(history)
 # => [{'rate_date': date(2023, 12, 29), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # SBI Forex Card rates can also be mirrored into MongoDB after parsing the PDF
-fx.seed(from_date=date.today(), to_date=date.today(), source="SBI")
+fx.seed(resource_dir="resources")
 print(fx.rate(source="SBI"))
 
-fx.seed(from_date=date.today(), to_date=date.today())
+fx.seed_historical(from_date=date(2023, 1, 1), to_date=date(2023, 1, 31))
