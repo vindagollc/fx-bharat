@@ -268,16 +268,17 @@ fx.seed()
 
 ## Source Selection (RBI vs SBI)
 
-FxBharat now stores RBI and SBI data in **separate tables/collections**. Query helpers always return SBI snapshots first (when present) followed by RBI snapshots. Use `seed_historical(..., source="RBI" | "SBI")` to ingest archival PDFs for a specific source; `seed()` pulls both sources for the current day and saves the SBI PDF into `resources/`.
+FxBharat now stores RBI and SBI data in **separate tables/collections**. Query helpers always return SBI snapshots first (when present) followed by RBI snapshots. Use the unified `seed(from_date=..., to_date=..., source=...)` helper to ingest targeted ranges; calling `seed()` with no arguments replays data for both sources from the last recorded checkpoint through today (including today) and stores the SBI PDF in `resources/`.
 
 ---
 
 ## Ingestion Controls
 
 * `source_filter` on `rate`, `history`, and `rates` lets you restrict output to `"rbi"` or `"sbi"` while keeping blended ordering.
-* Incremental seeding is enabled by default; the last ingested `rate_date` per source is detected and skipped.
-* Pass `dry_run=True` to `seed`, `seed_historical`, `seed_sbi_historical`, or `seed_rbi_forex` to validate connectivity without writing rows.
+* Incremental seeding is enabled by default using the new `ingestion_metadata` table; the last ingested `rate_date` per source is detected and skipped automatically during cron-style runs.
+* Pass `dry_run=True` to `seed`, `seed_sbi_historical`, or `seed_rbi_forex` to validate connectivity without writing rows.
 * Yearly aggregations now select the most recent snapshot per calendar year for each source.
+* `seed` accepts optional `from_date`, `to_date`, and `source` parameters to restrict ingestion. When you omit them, FxBharat resumes from the last metadata checkpoint for both sources and ingests through today.
 
 ## **2. Connecting to Your Own Database**
 
@@ -515,6 +516,12 @@ All ingestion and persistence layers are modular and override-able.
 ### 🔁 Idempotent ingestion
 
 `seed()` can be run safely multiple times without duplicate entries.
+
+---
+
+# Migration Notes
+
+See [MIGRATIONS.md](./MIGRATIONS.md) for upgrade guidance from 0.1.0 → 0.2.0 and 0.2.1, including the new ingestion metadata table and unified `seed` API.
 
 ---
 

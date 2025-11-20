@@ -1,6 +1,6 @@
 """Tests for the public package facade."""
 
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +9,7 @@ import pytest
 from fx_bharat import DatabaseBackend, DatabaseConnectionInfo, FxBharat, __version__
 from fx_bharat.db.mongo_backend import MongoBackend
 from fx_bharat.ingestion.models import ForexRateRecord
+from fx_bharat.utils.rbi import RBI_MIN_AVAILABLE_DATE
 
 
 def test_fx_bharat_class_is_exposed() -> None:
@@ -454,104 +455,62 @@ def test_database_connection_info_uses_database_name_query() -> None:
     assert info.url.endswith("/forex?sslmode=prefer")
 
 
-def test_fx_bharat_seed_historical_delegates_to_populate(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_seed_rejects_inverted_date_range(sqlite_fx: FxBharat) -> None:
+    with pytest.raises(ValueError, match="from_date must be on or before to_date"):
+        sqlite_fx.seed(from_date=date(2023, 2, 1), to_date=date(2023, 1, 1))
+
+
+def test_seed_with_explicit_range_targets_rbi(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     db_path = tmp_path / "seed.db"
-    config = DatabaseConnectionInfo(
-        backend=DatabaseBackend.SQLITE,
-        url=f"sqlite:///{db_path}",
-        name=str(db_path),
-        username=None,
-        password=None,
-        host=None,
-        port=None,
-    )
-    fx = FxBharat(db_config=config)
+    fx = FxBharat(db_config=f"sqlite:///{db_path}")
 
-    called: dict[str, object] = {}
+    calls: dict[str, object] = {}
 
-    def _fake_seed(from_str: str, to_str: str, *, db_path: Path, **_: object) -> None:
-        called["args"] = (from_str, to_str, Path(db_path))
+    def _fake_rbi(start: str, end: str, *, incremental: bool, **_: object) -> None:
+        calls["rbi"] = (start, end, incremental)
 
-    monkeypatch.setattr("fx_bharat.seeds.populate_rbi_forex.seed_rbi_forex", _fake_seed)
+    def _fake_sbi_hist(**_: object) -> None:
+        calls["sbi_hist"] = True
 
-    fx.seed_historical(date(2023, 1, 1), date(2023, 1, 2))
+    def _fake_sbi_today(**_: object) -> None:
+        calls["sbi_today"] = True
 
-    assert called["args"][0] == "2023-01-01"
-    assert called["args"][2] == db_path
+    monkeypatch.setattr("fx_bharat.seeds.populate_rbi_forex.seed_rbi_forex", _fake_rbi)
+    monkeypatch.setattr("fx_bharat.seeds.populate_sbi_forex.seed_sbi_historical", _fake_sbi_hist)
+    monkeypatch.setattr("fx_bharat.seeds.populate_sbi_forex.seed_sbi_today", _fake_sbi_today)
 
+    fx.seed(from_date=date(2023, 1, 1), to_date=date(2023, 1, 3), source="RBI")
 
-def test_seed_historical_rejects_requests_before_rbi_minimum(sqlite_fx: FxBharat) -> None:
-    with pytest.raises(ValueError, match="RBI do not provide the data before 12/04/2022"):
-        sqlite_fx.seed_historical(date(2022, 4, 11), date(2022, 4, 20))
+    assert calls["rbi"] == ("2023-01-01", "2023-01-03", False)
+    assert "sbi_hist" not in calls
+    assert "sbi_today" not in calls
 
 
-def test_seed_historical_rejects_future_end_date(sqlite_fx: FxBharat) -> None:
+def test_seed_default_fetches_sbi_today_and_history(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "seed.db"
+    fx = FxBharat(db_config=f"sqlite:///{db_path}")
+
+    calls: dict[str, object] = {}
     today = date.today()
-    with pytest.raises(ValueError, match="earlier than today"):
-        sqlite_fx.seed_historical(today, today)
 
+    def _fake_rbi(start: str, end: str, **_: object) -> None:
+        calls["rbi"] = (start, end)
 
-def test_seed_historical_mirrors_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    external = FxBharat(db_config="postgres://user:pwd@db:5432/fx")
+    def _fake_sbi_hist(*, start, end, **_: object) -> None:  # type: ignore[no-untyped-def]
+        calls["sbi_hist"] = (start, end)
 
-    called: dict[str, object] = {}
+    def _fake_sbi_today(**_: object) -> None:
+        calls["sbi_today"] = True
 
-    def _fake_seed(from_str: str, to_str: str, *, db_path: Path, **_: object) -> None:
-        called["range"] = (from_str, to_str)
-        called["db_path"] = Path(db_path)
+    monkeypatch.setattr("fx_bharat.seeds.populate_rbi_forex.seed_rbi_forex", _fake_rbi)
+    monkeypatch.setattr("fx_bharat.seeds.populate_sbi_forex.seed_sbi_historical", _fake_sbi_hist)
+    monkeypatch.setattr("fx_bharat.seeds.populate_sbi_forex.seed_sbi_today", _fake_sbi_today)
 
-    monkeypatch.setattr("fx_bharat.seeds.populate_rbi_forex.seed_rbi_forex", _fake_seed)
+    fx.seed(resource_dir=tmp_path / "resources")
 
-    created_sqlite_backends: list[object] = []
-
-    class DummySQLiteBackend:
-        def __init__(self, db_path: Path | str, manager=None):  # type: ignore[no-untyped-def]
-            self.db_path = Path(db_path)
-            self.manager = manager
-            self.fetch_called_with: tuple[date | None, date | None, str | None] | None = None
-            self.closed = False
-            self.rows = [
-                ForexRateRecord(rate_date=date(2023, 1, 1), currency="USD", rate=82.1),
-                ForexRateRecord(rate_date=date(2023, 1, 2), currency="EUR", rate=90.2),
-            ]
-            created_sqlite_backends.append(self)
-
-        def fetch_range(self, start=None, end=None, source=None):  # type: ignore[no-untyped-def]
-            self.fetch_called_with = (start, end, source)
-            return list(self.rows)
-
-        def close(self) -> None:
-            self.closed = True
-
-    class DummyExternalBackend:
-        def __init__(self) -> None:
-            self.rows: list[ForexRateRecord] = []
-            self.ensure_called = 0
-
-        def ensure_schema(self) -> None:
-            self.ensure_called += 1
-
-        def insert_rates(self, rows):  # type: ignore[no-untyped-def]
-            self.rows.extend(rows)
-
-    monkeypatch.setattr("fx_bharat.SQLiteBackend", DummySQLiteBackend)
-    external._backend_strategy = DummyExternalBackend()
-
-    external.seed_historical(date(2023, 1, 1), date(2023, 1, 2))
-
-    assert called["range"] == ("2023-01-01", "2023-01-02")
-    assert isinstance(called["db_path"], Path)
-    assert created_sqlite_backends
-    sqlite_backend = created_sqlite_backends[0]
-    assert sqlite_backend.fetch_called_with == (date(2023, 1, 1), date(2023, 1, 2), "RBI")
-    assert sqlite_backend.closed is True
-
-    backend = external._backend_strategy
-    assert isinstance(backend, DummyExternalBackend)
-    assert backend.ensure_called == 1
-    assert [row.currency for row in backend.rows] == ["USD", "EUR"]
+    assert calls["rbi"][1] == today.isoformat()
+    assert calls["sbi_hist"][1] == today - timedelta(days=1)
+    assert calls["sbi_today"] is True
 
 
 def test_seed_mirrors_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -559,8 +518,8 @@ def test_seed_mirrors_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch) 
 
     calls: dict[str, object] = {}
 
-    def _fake_seed_rbi(from_str: str, to_str: str, *, db_path: Path, **_: object) -> None:
-        calls["range"] = (from_str, to_str)
+    def _fake_seed_rbi(from_str: str, to_str: str, *, db_path: Path, incremental: bool, **_: object) -> None:
+        calls["range"] = (from_str, to_str, incremental)
         calls["db_path"] = Path(db_path)
 
     def _fake_seed_sbi_today(*, db_path: Path, resource_dir: Path, **_: object) -> None:
@@ -569,13 +528,20 @@ def test_seed_mirrors_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr("fx_bharat.seeds.populate_rbi_forex.seed_rbi_forex", _fake_seed_rbi)
     monkeypatch.setattr("fx_bharat.seeds.populate_sbi_forex.seed_sbi_today", _fake_seed_sbi_today)
 
+    today = date.today()
+    monkeypatch.setattr(
+        FxBharat,
+        "_get_ingestion_checkpoint",
+        lambda self, db_path, source: None,
+    )
+
     created_sqlite_backends: list[object] = []
 
     class DummySQLiteBackend:
         def __init__(self, db_path: Path | str, manager=None):  # type: ignore[no-untyped-def]
             self.db_path = Path(db_path)
             self.manager = manager
-            self.fetch_called_with: tuple[date | None, date | None, str | None] | None = None
+            self.fetch_called_with: list[tuple[date | None, date | None, str | None]] = []
             self.closed = False
             self.rows = [
                 ForexRateRecord(rate_date=date.today(), currency="USD", rate=82.1, source="RBI"),
@@ -584,7 +550,7 @@ def test_seed_mirrors_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch) 
             created_sqlite_backends.append(self)
 
         def fetch_range(self, start=None, end=None, source=None):  # type: ignore[no-untyped-def]
-            self.fetch_called_with = (start, end, source)
+            self.fetch_called_with.append((start, end, source))
             return list(self.rows)
 
         def close(self) -> None:
@@ -604,19 +570,21 @@ def test_seed_mirrors_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr("fx_bharat.SQLiteBackend", DummySQLiteBackend)
     external._backend_strategy = DummyExternalBackend()
 
-    external.seed(resource_dir=Path("resources"))
+    external.seed(from_date=today, to_date=today, resource_dir=Path("resources"))
 
-    today = date.today().isoformat()
-    assert calls["range"] == (today, today)
+    today_iso = today.isoformat()
+    assert calls["range"] == (today_iso, today_iso, False)
     assert isinstance(calls["db_path"], Path)
     sqlite_backend = created_sqlite_backends[0]
-    assert sqlite_backend.fetch_called_with == (date.today(), date.today(), None)
+    assert (today, today, "RBI") in sqlite_backend.fetch_called_with
+    assert (today, today, "SBI") in sqlite_backend.fetch_called_with
     assert sqlite_backend.closed is True
 
     backend = external._backend_strategy
     assert isinstance(backend, DummyExternalBackend)
     assert backend.ensure_called == 1
-    assert [row.currency for row in backend.rows] == ["USD", "EUR"]
+    assert len(backend.rows) == 4
+    assert {row.currency for row in backend.rows} == {"USD", "EUR"}
 
 
 def test_seed_inserts_today_for_both_sources(
@@ -635,6 +603,7 @@ def test_seed_inserts_today_for_both_sources(
     fx = FxBharat(db_config=config)
 
     today = date.today().isoformat()
+    min_rbi_date = RBI_MIN_AVAILABLE_DATE.isoformat()
     calls: dict[str, object] = {}
 
     def _fake_seed_rbi(from_str: str, to_str: str, *, db_path: Path, **_: object) -> None:
@@ -648,7 +617,7 @@ def test_seed_inserts_today_for_both_sources(
 
     fx.seed(resource_dir=tmp_path / "resources")
 
-    assert calls["rbi"][:2] == (today, today)
+    assert calls["rbi"][:2] == (min_rbi_date, today)
     assert calls["rbi"][2] == db_path
     assert calls["sbi"][0] == db_path
     assert calls["sbi"][1] == tmp_path / "resources"

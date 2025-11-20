@@ -102,9 +102,9 @@ def seed_sbi_historical(
     with SQLiteManager(db_path) as manager:
         effective_start = start
         if incremental and start is None:
-            latest = manager.latest_rate_date("SBI")
-            if latest:
-                effective_start = latest + timedelta(days=1)
+            checkpoint = manager.ingestion_checkpoint("SBI") or manager.latest_rate_date("SBI")
+            if checkpoint:
+                effective_start = checkpoint + timedelta(days=1)
         pending: list[Path] = list(_iter_pdf_paths(resources_root, effective_start, end))
         if download and effective_start is None and end is None:
             pending.append(downloader.fetch_latest())
@@ -118,6 +118,8 @@ def seed_sbi_historical(
             )
             total.inserted += result.inserted
             total.updated += result.updated
+            if result.inserted:
+                manager.update_ingestion_checkpoint("SBI", parsed.rate_date)
     return total
 
 
@@ -151,6 +153,8 @@ def seed_sbi_today(
         )
         total.inserted += result.inserted
         total.updated += result.updated
+        if result.inserted:
+            manager.update_ingestion_checkpoint("SBI", parsed.rate_date)
     return total
 
 

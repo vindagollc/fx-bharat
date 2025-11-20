@@ -76,9 +76,9 @@ def seed_rbi_forex(
     with SQLiteManager(db_path) as manager:
         effective_start = start_date
         if incremental:
-            latest = manager.latest_rate_date("RBI")
-            if latest and latest >= start_date:
-                effective_start = latest + timedelta(days=1)
+            checkpoint = manager.ingestion_checkpoint("RBI") or manager.latest_rate_date("RBI")
+            if checkpoint and checkpoint >= start_date:
+                effective_start = checkpoint + timedelta(days=1)
         if effective_start > end_date:
             LOGGER.info("RBI data already ingested up to %s; nothing to do", end_date)
             return total
@@ -98,6 +98,9 @@ def seed_rbi_forex(
                 _log_chunk_result(f"Chunk {chunk.start} → {chunk.end}", result)
                 total.inserted += result.inserted
                 total.updated += result.updated
+                if result.inserted:
+                    latest_day = max(row.rate_date for row in csv_rows)
+                    manager.update_ingestion_checkpoint("RBI", latest_day)
     LOGGER.info(
         "Seeding finished: inserted %s rows, updated %s rows (total %s)",
         total.inserted,

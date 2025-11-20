@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import warnings
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from enum import Enum
 from importlib import metadata as importlib_metadata
 from pathlib import Path
@@ -20,7 +20,7 @@ from fx_bharat.db.postgres_backend import PostgresBackend
 from fx_bharat.db.sqlite_backend import SQLiteBackend
 from fx_bharat.db.sqlite_manager import PersistenceResult, SQLiteManager
 from fx_bharat.ingestion.models import ForexRateRecord
-from fx_bharat.utils.rbi import enforce_rbi_min_date
+from fx_bharat.utils.rbi import RBI_MIN_AVAILABLE_DATE, enforce_rbi_min_date
 
 try:  # pragma: no cover - imported lazily
     from sqlalchemy import create_engine, text
@@ -40,8 +40,6 @@ __all__ = [
     "FxBharat",
     "seed_rbi_forex",
     "seed_sbi_forex",
-    "seed_sbi_historical",
-    "seed_sbi_today",
     "SQLiteManager",
     "PersistenceResult",
     "RBISeleniumClient",
@@ -305,75 +303,20 @@ class FxBharat:
         target_backend.ensure_schema()
         target_backend.insert_rates(rows)
 
-    def seed_historical(
-        self,
-        from_date: date,
-        to_date: date,
-        *,
-        source: str = "RBI",
-        resource_dir: str | Path | None = None,
-        download_latest: bool | None = None,
-        incremental: bool = True,
-        dry_run: bool = False,
-    ) -> None:
-        """Seed SQLite and mirror rows into the configured backend using past data."""
-
-        if to_date >= date.today():
-            raise ValueError("Historical seeding requires `to_date` to be earlier than today")
-
-        source_upper = source.upper()
-        if source_upper == "RBI":
-            enforce_rbi_min_date(from_date, to_date)
-
-        sqlite_db_path = (
-            Path(self.sqlite_manager.db_path)
-            if self.sqlite_manager is not None
-            else DEFAULT_SQLITE_DB_PATH
-        )
-
-        if source_upper == "RBI":
-            seed_rbi_forex(
-                from_date.isoformat(),
-                to_date.isoformat(),
-                db_path=sqlite_db_path,
-                incremental=incremental,
-                dry_run=dry_run,
-            )
-        elif source_upper == "SBI":
-            seed_sbi_historical(
-                db_path=sqlite_db_path,
-                resource_dir=resource_dir or Path("resources"),
-                start=from_date,
-                end=to_date,
-                download=True if download_latest is None else download_latest,
-                incremental=incremental,
-                dry_run=dry_run,
-            )
-        else:
-            raise ValueError("Unsupported source. Use 'RBI' or 'SBI'.")
-
-        if dry_run:
-            return None
-
-        if self.connection_info.is_external:
-            sqlite_backend = SQLiteBackend(db_path=sqlite_db_path)
-            try:
-                rows = sqlite_backend.fetch_range(from_date, to_date, source=source_upper)
-            finally:
-                sqlite_backend.close()
-
-            target_backend = self._get_backend_strategy()
-            target_backend.ensure_schema()
-            target_backend.insert_rates(rows)
-
     def seed(
         self,
+        from_date: date | None = None,
+        to_date: date | None = None,
         *,
+        source: Literal["RBI", "SBI", None] = None,
         resource_dir: str | Path | None = None,
         incremental: bool = True,
         dry_run: bool = False,
     ) -> None:
-        """Insert today's data for both RBI and SBI and mirror to external backends."""
+        """Seed forex data into SQLite and mirror into external backends."""
+
+        if from_date and to_date and from_date > to_date:
+            raise ValueError("from_date must be on or before to_date")
 
         today = date.today()
         sqlite_db_path = (
@@ -382,18 +325,54 @@ class FxBharat:
             else DEFAULT_SQLITE_DB_PATH
         )
 
-        seed_rbi_forex(
-            today.isoformat(),
-            today.isoformat(),
-            db_path=sqlite_db_path,
-            incremental=incremental,
-            dry_run=dry_run,
-        )
-        seed_sbi_today(
-            db_path=sqlite_db_path,
-            resource_dir=resource_dir or Path("resources"),
-            dry_run=dry_run,
-        )
+        target_sources = self._normalise_source_filter(source.lower() if source else None)
+        resolved_to = to_date or today
+        user_range_specified = from_date is not None or to_date is not None
+        mirror_windows: list[tuple[date | None, date | None, str | None]] = []
+
+        for current_source in target_sources:
+            if current_source == "RBI":
+                start_date = from_date or RBI_MIN_AVAILABLE_DATE
+                end_date = resolved_to
+                enforce_rbi_min_date(start_date, end_date)
+                seed_rbi_forex(
+                    start_date.isoformat(),
+                    end_date.isoformat(),
+                    db_path=sqlite_db_path,
+                    incremental=incremental if not user_range_specified else False,
+                    dry_run=dry_run,
+                )
+                checkpoint = self._get_ingestion_checkpoint(sqlite_db_path, "RBI")
+                mirror_start = from_date or (
+                    checkpoint + timedelta(days=1) if checkpoint else start_date
+                )
+                mirror_windows.append((mirror_start, end_date, "RBI"))
+                continue
+
+            include_today = resolved_to >= today
+            historical_end = today - timedelta(days=1) if include_today else resolved_to
+            start_date = from_date
+            if historical_end >= (start_date or historical_end):
+                seed_sbi_historical(
+                    db_path=sqlite_db_path,
+                    resource_dir=resource_dir or Path("resources"),
+                    start=start_date,
+                    end=historical_end,
+                    download=False,
+                    incremental=incremental if not user_range_specified else False,
+                    dry_run=dry_run,
+                )
+            if include_today:
+                seed_sbi_today(
+                    db_path=sqlite_db_path,
+                    resource_dir=resource_dir or Path("resources"),
+                    dry_run=dry_run,
+                )
+            checkpoint = self._get_ingestion_checkpoint(sqlite_db_path, "SBI")
+            mirror_start = from_date or (
+                checkpoint + timedelta(days=1) if checkpoint else start_date
+            )
+            mirror_windows.append((mirror_start, resolved_to, "SBI"))
 
         if dry_run:
             return None
@@ -401,7 +380,9 @@ class FxBharat:
         if self.connection_info.is_external:
             sqlite_backend = SQLiteBackend(db_path=sqlite_db_path)
             try:
-                rows = sqlite_backend.fetch_range(today, today, source=None)
+                rows: list[ForexRateRecord] = []
+                for start, end, src in mirror_windows:
+                    rows.extend(sqlite_backend.fetch_range(start, end, source=src))
             finally:
                 sqlite_backend.close()
 
@@ -505,6 +486,12 @@ class FxBharat:
         )
         return self.history(from_date, to_date, frequency=frequency, source_filter=source_filter)
 
+    def _get_ingestion_checkpoint(self, sqlite_db_path: Path, source: str) -> date | None:
+        if self.sqlite_manager is not None:
+            return self.sqlite_manager.ingestion_checkpoint(source)
+        with SQLiteManager(sqlite_db_path) as manager:
+            return manager.ingestion_checkpoint(source)
+
     @staticmethod
     def _group_rows_by_date(
         rows: Iterable[ForexRateRecord],
@@ -588,7 +575,7 @@ class FxBharat:
 
     @staticmethod
     def _normalise_source_filter(
-        source_filter: Literal["rbi", "sbi", None] = None,
+        source_filter: str | None = None,
     ) -> tuple[str, ...]:
         if source_filter is None:
             return ("SBI", "RBI")

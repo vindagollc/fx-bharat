@@ -50,6 +50,13 @@ else:  # pragma: no cover - module import time
         cn_sell = Column(Float, nullable=True)
         created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
 
+    class _IngestionMetadata(Base):
+        __tablename__ = "ingestion_metadata"
+
+        source = Column(String, primary_key=True)
+        last_ingested_date = Column(Date, nullable=False)
+        updated_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+
 
 if TYPE_CHECKING:  # pragma: no cover - type checker helper
     from sqlalchemy.engine import Engine
@@ -84,6 +91,12 @@ CREATE TABLE IF NOT EXISTS forex_rates_sbi (
     cn_sell REAL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(rate_date, currency)
+);
+
+CREATE TABLE IF NOT EXISTS ingestion_metadata (
+    source TEXT PRIMARY KEY,
+    last_ingested_date DATE NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -160,6 +173,12 @@ class _BackendProtocol(Protocol):
         ...  # pragma: no cover - protocol definition
 
     def latest_rate_date(self, source: str) -> date | None:
+        ...  # pragma: no cover - protocol definition
+
+    def ingestion_checkpoint(self, source: str) -> date | None:
+        ...  # pragma: no cover - protocol definition
+
+    def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
         ...  # pragma: no cover - protocol definition
 
 
@@ -293,6 +312,24 @@ class _SQLAlchemyBackend:
         with self._SessionFactory() as session:
             result = session.execute(stmt).scalar_one_or_none()
         return cast(date | None, result)
+
+    def ingestion_checkpoint(self, source: str) -> date | None:
+        with self._SessionFactory() as session:
+            record = session.get(_IngestionMetadata, source.upper())
+            return cast(date | None, record.last_ingested_date) if record else None
+
+    def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
+        with self._SessionFactory() as session:
+            existing = session.get(_IngestionMetadata, source.upper())
+            if existing is None:
+                session.add(
+                    _IngestionMetadata(source=source.upper(), last_ingested_date=rate_date)
+                )
+            elif existing.last_ingested_date < rate_date:
+                existing.last_ingested_date = rate_date
+            else:
+                return
+            session.commit()
 
     def close(self) -> None:  # pragma: no cover - trivial
         self.engine.dispose()
@@ -442,6 +479,28 @@ class _SQLiteFallbackBackend:
         value = cursor.fetchone()["latest"]
         return date.fromisoformat(value) if value else None
 
+    def ingestion_checkpoint(self, source: str) -> date | None:
+        cursor = self._connection.execute(
+            "SELECT last_ingested_date FROM ingestion_metadata WHERE source = ?",
+            (source.upper(),),
+        )
+        value = cursor.fetchone()
+        if value is None:
+            return None
+        return date.fromisoformat(value["last_ingested_date"])
+
+    def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO ingestion_metadata(source, last_ingested_date)
+                VALUES(?, ?)
+                ON CONFLICT(source) DO UPDATE SET last_ingested_date = excluded.last_ingested_date
+                WHERE excluded.last_ingested_date > ingestion_metadata.last_ingested_date
+                """,
+                (source.upper(), rate_date.isoformat()),
+            )
+
     def close(self) -> None:  # pragma: no cover - trivial
         self._connection.close()
 
@@ -486,6 +545,12 @@ class SQLiteManager:
 
     def latest_rate_date(self, source: str) -> date | None:
         return self._backend.latest_rate_date(source)
+
+    def ingestion_checkpoint(self, source: str) -> date | None:
+        return self._backend.ingestion_checkpoint(source)
+
+    def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
+        self._backend.update_ingestion_checkpoint(source, rate_date)
 
     def __enter__(self) -> "SQLiteManager":  # pragma: no cover - trivial
         return self

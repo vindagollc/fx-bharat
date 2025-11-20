@@ -45,7 +45,6 @@ print(history)
 fx.seed()
 print(fx.rate())
 
-# Seed historical RBI Forex rates for a specific window
-fx.seed_historical(from_date=date(2020, 1, 1), to_date=date(2025, 11, 19), source="SBI")
-fx.seed_historical(from_date=date(2022, 4, 12), to_date=date(2025, 11, 19), source="RBI")
-#
+# Seed data for a specific window or source
+fx.seed(from_date=date(2020, 1, 1), to_date=date(2020, 12, 31), source="SBI")
+fx.seed(from_date=date(2022, 4, 12), to_date=date(2022, 12, 31), source="RBI")

@@ -8,13 +8,15 @@
 - Source filter for queries
 - Yearly frequency cleanup
 - Mermaid ER diagram and schema.sql
+- Ingestion metadata checkpoints for cron-friendly seeding
+- Migration guide for 0.1.0 → 0.2.x
 ### Fixed
 - README inconsistencies
 - Deprecated `.rates()` references
 - Broken links & method typos
 ### Changed
 - Improved ingestion resilience
-- Incremental seeding
+- Incremental seeding with unified `seed(from_date, to_date, source)` API (replaces `seed_historical`)
 - CI coverage setup
 
 ## [0.2.0] - 2025-11-20

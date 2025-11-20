@@ -65,6 +65,12 @@ def test_seed_rbi_forex_coordinates_pipeline(
         def latest_rate_date(self, source: str):  # type: ignore[no-untyped-def]
             return None
 
+        def ingestion_checkpoint(self, source: str):  # type: ignore[no-untyped-def]
+            return None
+
+        def update_ingestion_checkpoint(self, source: str, rate_date: date):  # type: ignore[no-untyped-def]
+            recorded.append((source, rate_date))
+
     class DummyClient:
         def __init__(self, *, download_dir: Path | None, headless: bool) -> None:
             self.download_dir = download_dir or tmp_path

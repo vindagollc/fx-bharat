@@ -39,4 +39,4 @@ fx.migrate()
 # fx.seed(resource_dir="resources")
 # print(fx.rate())
 #
-# fx.seed_historical(from_date=date(2023, 1, 1), to_date=date(2023, 1, 31))
+# fx.seed(from_date=date(2023, 1, 1), to_date=date(2023, 1, 31))
