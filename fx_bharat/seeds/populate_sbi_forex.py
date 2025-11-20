@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -80,6 +80,8 @@ def seed_sbi_historical(
     start: date | None = None,
     end: date | None = None,
     download: bool = True,
+    incremental: bool = True,
+    dry_run: bool = False,
 ) -> PersistenceResult:
     """Backfill SBI forex data from PDFs and optionally fetch the latest copy.
 
@@ -91,15 +93,23 @@ def seed_sbi_historical(
     if end and end >= today:
         raise ValueError("Historical seeding only supports dates earlier than today")
 
+    if dry_run:
+        LOGGER.info("Dry-run enabled; skipping SBI ingestion for %s → %s", start, end)
+        return PersistenceResult()
     parser = SBIPDFParser()
     downloader = SBIPDFDownloader()
     resources_root = Path(resource_dir)
-    pending: list[Path] = list(_iter_pdf_paths(resources_root, start, end))
-    if download and start is None and end is None:
-        pending.append(downloader.fetch_latest())
-
-    total = PersistenceResult()
     with SQLiteManager(db_path) as manager:
+        effective_start = start
+        if incremental and start is None:
+            latest = manager.latest_rate_date("SBI")
+            if latest:
+                effective_start = latest + timedelta(days=1)
+        pending: list[Path] = list(_iter_pdf_paths(resources_root, effective_start, end))
+        if download and effective_start is None and end is None:
+            pending.append(downloader.fetch_latest())
+
+        total = PersistenceResult()
         for pdf_path in pending:
             parsed = parser.parse(pdf_path)
             result = manager.insert_rates(parsed.rates)
@@ -112,10 +122,16 @@ def seed_sbi_historical(
 
 
 def seed_sbi_today(
-    *, db_path: str | Path = DEFAULT_SQLITE_DB_PATH, resource_dir: str | Path = "resources"
+    *,
+    db_path: str | Path = DEFAULT_SQLITE_DB_PATH,
+    resource_dir: str | Path = "resources",
+    dry_run: bool = False,
 ) -> PersistenceResult:
     """Download today's SBI PDF, store it under ``resource_dir``, and insert rows."""
 
+    if dry_run:
+        LOGGER.info("Dry-run enabled; skipping SBI ingestion for today")
+        return PersistenceResult()
     parser = SBIPDFParser()
     resources_root = Path(resource_dir)
     downloader = SBIPDFDownloader(download_dir=resources_root)

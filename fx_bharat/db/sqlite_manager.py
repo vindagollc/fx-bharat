@@ -16,6 +16,7 @@ LOGGER = get_logger(__name__)
 
 try:  # pragma: no cover - exercised indirectly
     from sqlalchemy import Column, Date, DateTime, Float, String, create_engine, select, text
+    from sqlalchemy.sql import func
     from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 except ModuleNotFoundError:  # pragma: no cover - fallback path
     SQLALCHEMY_AVAILABLE = False
@@ -158,6 +159,9 @@ class _BackendProtocol(Protocol):
     def close(self) -> None:
         ...  # pragma: no cover - protocol definition
 
+    def latest_rate_date(self, source: str) -> date | None:
+        ...  # pragma: no cover - protocol definition
+
 
 class _SQLAlchemyBackend:
     """SQLAlchemy implementation used when the dependency is available."""
@@ -266,23 +270,29 @@ class _SQLAlchemyBackend:
                             cn_sell=cast(float | None, sbi_model.cn_sell),
                         )
                     )
-            if source is None or source.upper() == "RBI":
-                rbi_stmt = select(_RbiRate).order_by(_RbiRate.rate_date)
-                if start is not None:
-                    rbi_stmt = rbi_stmt.where(_RbiRate.rate_date >= start)
-                if end is not None:
-                    rbi_stmt = rbi_stmt.where(_RbiRate.rate_date <= end)
-                for rbi_row in session.execute(rbi_stmt).scalars():
-                    rbi_model = cast(_RbiRate, rbi_row)
-                    records.append(
-                        ForexRateRecord(
-                            rate_date=cast(date, rbi_model.rate_date),
-                            currency=cast(str, rbi_model.currency),
-                            rate=cast(float, rbi_model.rate),
-                            source="RBI",
-                        )
+        if source is None or source.upper() == "RBI":
+            rbi_stmt = select(_RbiRate).order_by(_RbiRate.rate_date)
+            if start is not None:
+                rbi_stmt = rbi_stmt.where(_RbiRate.rate_date >= start)
+            if end is not None:
+                rbi_stmt = rbi_stmt.where(_RbiRate.rate_date <= end)
+            for rbi_row in session.execute(rbi_stmt).scalars():
+                rbi_model = cast(_RbiRate, rbi_row)
+                records.append(
+                    ForexRateRecord(
+                        rate_date=cast(date, rbi_model.rate_date),
+                        currency=cast(str, rbi_model.currency),
+                        rate=cast(float, rbi_model.rate),
+                        source="RBI",
                     )
+                )
         return records
+
+    def latest_rate_date(self, source: str) -> date | None:
+        stmt = select(func.max(_SbiRate.rate_date) if source.upper() == "SBI" else func.max(_RbiRate.rate_date))
+        with self._SessionFactory() as session:
+            result = session.execute(stmt).scalar_one_or_none()
+        return cast(date | None, result)
 
     def close(self) -> None:  # pragma: no cover - trivial
         self.engine.dispose()
@@ -426,6 +436,12 @@ class _SQLiteFallbackBackend:
 
         return records
 
+    def latest_rate_date(self, source: str) -> date | None:
+        table = "forex_rates_sbi" if source.upper() == "SBI" else "forex_rates_rbi"
+        cursor = self._connection.execute(f"SELECT MAX(rate_date) AS latest FROM {table}")
+        value = cursor.fetchone()["latest"]
+        return date.fromisoformat(value) if value else None
+
     def close(self) -> None:  # pragma: no cover - trivial
         self._connection.close()
 
@@ -467,6 +483,9 @@ class SQLiteManager:
 
     def close(self) -> None:  # pragma: no cover - trivial
         self._backend.close()
+
+    def latest_rate_date(self, source: str) -> date | None:
+        return self._backend.latest_rate_date(source)
 
     def __enter__(self) -> "SQLiteManager":  # pragma: no cover - trivial
         return self

@@ -62,6 +62,9 @@ def test_seed_rbi_forex_coordinates_pipeline(
 
             return PersistenceResult(inserted=len(rows), updated=0)
 
+        def latest_rate_date(self, source: str):  # type: ignore[no-untyped-def]
+            return None
+
     class DummyClient:
         def __init__(self, *, download_dir: Path | None, headless: bool) -> None:
             self.download_dir = download_dir or tmp_path
@@ -99,6 +102,18 @@ def test_seed_rbi_forex_coordinates_pipeline(
 def test_seed_rbi_forex_rejects_dates_before_rbi_minimum(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="RBI do not provide the data before 12/04/2022"):
         seeds_module.seed_rbi_forex("2022-04-01", "2022-04-30", db_path=tmp_path / "fx.db")
+
+
+def test_seed_rbi_forex_supports_dry_run(tmp_path: Path) -> None:
+    result = seeds_module.seed_rbi_forex(
+        "2024-01-01",
+        "2024-01-02",
+        db_path=tmp_path / "fx.db",
+        dry_run=True,
+    )
+
+    assert result.inserted == 0
+    assert result.updated == 0
 
 
 def test_seeds_module_lazy_attribute(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -471,7 +471,7 @@ def test_fx_bharat_seed_historical_delegates_to_populate(
 
     called: dict[str, object] = {}
 
-    def _fake_seed(from_str: str, to_str: str, *, db_path: Path) -> None:
+    def _fake_seed(from_str: str, to_str: str, *, db_path: Path, **_: object) -> None:
         called["args"] = (from_str, to_str, Path(db_path))
 
     monkeypatch.setattr("fx_bharat.seeds.populate_rbi_forex.seed_rbi_forex", _fake_seed)
@@ -498,7 +498,7 @@ def test_seed_historical_mirrors_rows_to_external_backend(monkeypatch: pytest.Mo
 
     called: dict[str, object] = {}
 
-    def _fake_seed(from_str: str, to_str: str, *, db_path: Path) -> None:
+    def _fake_seed(from_str: str, to_str: str, *, db_path: Path, **_: object) -> None:
         called["range"] = (from_str, to_str)
         called["db_path"] = Path(db_path)
 
@@ -559,11 +559,11 @@ def test_seed_mirrors_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch) 
 
     calls: dict[str, object] = {}
 
-    def _fake_seed_rbi(from_str: str, to_str: str, *, db_path: Path) -> None:
+    def _fake_seed_rbi(from_str: str, to_str: str, *, db_path: Path, **_: object) -> None:
         calls["range"] = (from_str, to_str)
         calls["db_path"] = Path(db_path)
 
-    def _fake_seed_sbi_today(*, db_path: Path, resource_dir: Path) -> None:
+    def _fake_seed_sbi_today(*, db_path: Path, resource_dir: Path, **_: object) -> None:
         calls["sbi"] = (Path(db_path), resource_dir)
 
     monkeypatch.setattr("fx_bharat.seeds.populate_rbi_forex.seed_rbi_forex", _fake_seed_rbi)
@@ -637,10 +637,10 @@ def test_seed_inserts_today_for_both_sources(
     today = date.today().isoformat()
     calls: dict[str, object] = {}
 
-    def _fake_seed_rbi(from_str: str, to_str: str, *, db_path: Path) -> None:
+    def _fake_seed_rbi(from_str: str, to_str: str, *, db_path: Path, **_: object) -> None:
         calls["rbi"] = (from_str, to_str, Path(db_path))
 
-    def _fake_seed_sbi_today(*, db_path: Path, resource_dir: Path) -> None:
+    def _fake_seed_sbi_today(*, db_path: Path, resource_dir: Path, **_: object) -> None:
         calls["sbi"] = (Path(db_path), resource_dir)
 
     monkeypatch.setattr("fx_bharat.seeds.populate_rbi_forex.seed_rbi_forex", _fake_seed_rbi)

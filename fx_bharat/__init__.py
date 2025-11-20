@@ -313,6 +313,8 @@ class FxBharat:
         source: str = "RBI",
         resource_dir: str | Path | None = None,
         download_latest: bool | None = None,
+        incremental: bool = True,
+        dry_run: bool = False,
     ) -> None:
         """Seed SQLite and mirror rows into the configured backend using past data."""
 
@@ -334,6 +336,8 @@ class FxBharat:
                 from_date.isoformat(),
                 to_date.isoformat(),
                 db_path=sqlite_db_path,
+                incremental=incremental,
+                dry_run=dry_run,
             )
         elif source_upper == "SBI":
             seed_sbi_historical(
@@ -342,9 +346,14 @@ class FxBharat:
                 start=from_date,
                 end=to_date,
                 download=True if download_latest is None else download_latest,
+                incremental=incremental,
+                dry_run=dry_run,
             )
         else:
             raise ValueError("Unsupported source. Use 'RBI' or 'SBI'.")
+
+        if dry_run:
+            return None
 
         if self.connection_info.is_external:
             sqlite_backend = SQLiteBackend(db_path=sqlite_db_path)
@@ -361,6 +370,8 @@ class FxBharat:
         self,
         *,
         resource_dir: str | Path | None = None,
+        incremental: bool = True,
+        dry_run: bool = False,
     ) -> None:
         """Insert today's data for both RBI and SBI and mirror to external backends."""
 
@@ -371,11 +382,21 @@ class FxBharat:
             else DEFAULT_SQLITE_DB_PATH
         )
 
-        seed_rbi_forex(today.isoformat(), today.isoformat(), db_path=sqlite_db_path)
+        seed_rbi_forex(
+            today.isoformat(),
+            today.isoformat(),
+            db_path=sqlite_db_path,
+            incremental=incremental,
+            dry_run=dry_run,
+        )
         seed_sbi_today(
             db_path=sqlite_db_path,
             resource_dir=resource_dir or Path("resources"),
+            dry_run=dry_run,
         )
+
+        if dry_run:
+            return None
 
         if self.connection_info.is_external:
             sqlite_backend = SQLiteBackend(db_path=sqlite_db_path)
@@ -388,13 +409,19 @@ class FxBharat:
             target_backend.ensure_schema()
             target_backend.insert_rates(rows)
 
-    def rate(self, rate_date: date | None = None) -> List[Dict[str, Any]]:
+    def rate(
+        self,
+        rate_date: date | None = None,
+        *,
+        source_filter: Literal["rbi", "sbi", None] = None,
+    ) -> List[Dict[str, Any]]:
         """Return a forex rate snapshot for ``rate_date`` or the latest entry."""
 
         backend = self._get_backend_strategy()
         snapshots: List[Dict[str, Any]] = []
+        sources = self._normalise_source_filter(source_filter)
 
-        for source in ("SBI", "RBI"):
+        for source in sources:
             if rate_date is not None and source == "RBI":
                 enforce_rbi_min_date(rate_date)
             rows = (
@@ -406,13 +433,18 @@ class FxBharat:
             if snapshot:
                 snapshots.append(snapshot)
 
-        return snapshots
+        return sorted(
+            snapshots,
+            key=lambda snap: (0 if snap["source"] == "SBI" else 1, snap["rate_date"]),
+        )
 
     def history(
         self,
         from_date: date,
         to_date: date,
         frequency: Literal["daily", "weekly", "monthly", "yearly"] = "daily",
+        *,
+        source_filter: Literal["rbi", "sbi", None] = None,
     ) -> List[Dict[str, Any]]:
         """Return forex rate snapshots within ``from_date``/``to_date``.
 
@@ -428,7 +460,7 @@ class FxBharat:
         snapshots: List[Dict[str, Any]] = []
         backend = self._get_backend_strategy()
 
-        for source in ("SBI", "RBI"):
+        for source in self._normalise_source_filter(source_filter):
             if source == "RBI":
                 enforce_rbi_min_date(from_date, to_date)
             rows = backend.fetch_range(from_date, to_date, source=source)
@@ -441,7 +473,10 @@ class FxBharat:
                 [self._snapshot_payload(day, grouped[day], source) for day in selected]
             )
 
-        return snapshots
+        return sorted(
+            snapshots,
+            key=lambda snap: (0 if snap["source"] == "SBI" else 1, snap["rate_date"]),
+        )
 
     def historical(
         self,
@@ -458,6 +493,8 @@ class FxBharat:
         from_date: date,
         to_date: date,
         frequency: Literal["daily", "weekly", "monthly", "yearly"] = "daily",
+        *,
+        source_filter: Literal["rbi", "sbi", None] = None,
     ) -> List[Dict[str, Any]]:
         """Deprecated alias; use :meth:`history` instead."""
 
@@ -466,7 +503,7 @@ class FxBharat:
             DeprecationWarning,
             stacklevel=2,
         )
-        return self.history(from_date, to_date, frequency=frequency)
+        return self.history(from_date, to_date, frequency=frequency, source_filter=source_filter)
 
     @staticmethod
     def _group_rows_by_date(
@@ -545,8 +582,19 @@ class FxBharat:
         buckets: Dict[Any, date] = {}
         for day in dates:
             key = key_builder(day)
-            buckets[key] = day
+            if key not in buckets or day > buckets[key]:
+                buckets[key] = day
         return sorted(buckets.values())
+
+    @staticmethod
+    def _normalise_source_filter(
+        source_filter: Literal["rbi", "sbi", None] = None,
+    ) -> tuple[str, ...]:
+        if source_filter is None:
+            return ("SBI", "RBI")
+        if source_filter.lower() not in {"rbi", "sbi"}:
+            raise ValueError("source_filter must be one of 'rbi', 'sbi', or None")
+        return (source_filter.upper(),)
 
     def connection(self) -> tuple[bool, str | None]:
         """Attempt to establish a database connection and report the outcome."""
