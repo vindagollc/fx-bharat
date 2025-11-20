@@ -1,22 +1,20 @@
-"""Automation helpers for downloading RBI forex reference rate Excel files."""
+"""Pure requests-based downloader for RBI reference rate Excel files (no Selenium!)."""
 
 from __future__ import annotations
 
-import shutil
+import re
 import time
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Optional, Sequence
-
-from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.remote.webelement import WebElement
-from selenium.webdriver.support.ui import WebDriverWait
+from typing import Optional, TYPE_CHECKING
 
 from fx_bharat.utils.logger import get_logger
+
+if TYPE_CHECKING:  # pragma: no cover - imported only for type checking
+    import requests
+    from bs4 import BeautifulSoup
+
 
 LOGGER = get_logger(__name__)
 RBI_ARCHIVE_URL = "https://www.rbi.org.in/Scripts/ReferenceRateArchive.aspx"
@@ -24,263 +22,157 @@ RBI_ARCHIVE_URL = "https://www.rbi.org.in/Scripts/ReferenceRateArchive.aspx"
 
 @dataclass
 class RBIPageLocators:
-    """Selectors used to interact with the RBI reference rate form."""
+    """Form field names used by the RBI reference rate archive."""
 
-    from_date_locators: tuple[tuple[str, str], ...] = (
-        (By.ID, "txtFromDate"),
-        (By.NAME, "txtFromDate"),
-        (By.ID, "ctl00_ContentPlaceHolder1_FromDateTextBox"),
-        (By.NAME, "ctl00$ContentPlaceHolder1$FromDateTextBox"),
-    )
-    to_date_locators: tuple[tuple[str, str], ...] = (
-        (By.ID, "txtToDate"),
-        (By.NAME, "txtToDate"),
-        (By.ID, "ctl00_ContentPlaceHolder1_ToDateTextBox"),
-        (By.NAME, "ctl00$ContentPlaceHolder1$ToDateTextBox"),
-    )
-    go_button_locators: tuple[tuple[str, str], ...] = (
-        (By.ID, "btnSubmit"),
-        (By.NAME, "btnSubmit"),
-        (By.ID, "ctl00_ContentPlaceHolder1_btnGo"),
-        (By.NAME, "ctl00$ContentPlaceHolder1$btnGo"),
-    )
-    download_link_locators: tuple[tuple[str, str], ...] = (
-        (By.ID, "lnkDownloadExcel"),
-        (By.ID, "ctl00_ContentPlaceHolder1_lnkDownload"),
-        (By.NAME, "ctl00$ContentPlaceHolder1$lnkDownload"),
-    )
-    form_iframe_css: str | None = None
+    from_date_name: str = "ctl00$ContentPlaceHolder1$FromDateTextBox"
+    to_date_name: str = "ctl00$ContentPlaceHolder1$ToDateTextBox"
+    go_button_name: str = "ctl00$ContentPlaceHolder1$btnGo"
+    download_link_id: str = "ctl00_ContentPlaceHolder1_lnkDownload"
 
 
-class RBISeleniumClient:
-    """Selenium-based client responsible for downloading RBI Excel files."""
+class RBIRequestsClient:
+    """Fast, reliable RBI Excel downloader using only requests + BeautifulSoup."""
 
     def __init__(
         self,
         *,
         download_dir: Optional[Path] = None,
-        headless: bool = True,
-        timeout: int = 60,
-        max_attempts: int = 3,
-        retry_backoff: float = 2.0,
-        locators: RBIPageLocators | None = None,
+        timeout: int = 30,
         date_format: str = "%d/%m/%Y",
-        driver: webdriver.Chrome | None = None,
+        max_attempts: int = 5,
+        backoff_seconds: float = 2.0,
     ) -> None:
-        if download_dir is None:
-            self.download_dir = Path.cwd() / "rbi_downloads"
-        else:
-            self.download_dir = Path(download_dir)
+        self.download_dir = Path(download_dir) if download_dir else Path.cwd() / "rbi_downloads"
         self.download_dir.mkdir(parents=True, exist_ok=True)
-        self._owns_download_dir = False
-        self.max_attempts = max_attempts
-        self.retry_backoff = retry_backoff
-        # RBI downloads can occasionally take longer than the initial page
-        # interactions, so provide a generous default timeout while still
-        # allowing callers to override it.
         self.timeout = timeout
-        self.locators = locators or RBIPageLocators()
         self.date_format = date_format
-        self._owns_driver = driver is None
-        if driver is None:
-            options = Options()
-            if headless:
-                options.add_argument("--headless=new")
-            options.add_argument("--disable-gpu")
-            options.add_argument("--no-sandbox")
-            options.add_argument("--disable-dev-shm-usage")
-            options.add_argument("--disable-blink-features=AutomationControlled")
-            options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            options.add_experimental_option("useAutomationExtension", False)
-            prefs = {
-                "download.default_directory": str(self.download_dir.resolve()),
-                "download.prompt_for_download": False,
-                "download.directory_upgrade": True,
-                "safebrowsing.enabled": True,
-                "plugins.always_open_pdf_externally": True,
+        self.locators = RBIPageLocators()
+        self.max_attempts = max_attempts
+        self.backoff_seconds = backoff_seconds
+        import requests
+
+        self.session = requests.Session()
+        self.session.headers.update(
+            {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Referer": RBI_ARCHIVE_URL,
             }
-            options.add_experimental_option("prefs", prefs)
-            self.driver = webdriver.Chrome(options=options)
-            self.driver.maximize_window()
-        else:
-            self.driver = driver
+        )
 
-    def close(self) -> None:
-        """Close the browser and cleanup."""
+    def _get_page_with_dates(self, start_date: date, end_date: date):
+        from bs4 import BeautifulSoup
 
-        if getattr(self, "driver", None) is not None and self._owns_driver:
-            self.driver.quit()
-        if getattr(self, "download_dir", None) and self._owns_download_dir:
-            shutil.rmtree(self.download_dir, ignore_errors=True)
+        formatted_start = start_date.strftime(self.date_format)
+        formatted_end = end_date.strftime(self.date_format)
 
-    def __enter__(self) -> "RBISeleniumClient":  # pragma: no cover - trivial
-        return self
+        response = self.session.get(RBI_ARCHIVE_URL, timeout=self.timeout)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
 
-    def __exit__(self, exc_type, exc, tb) -> None:  # pragma: no cover - trivial
-        self.close()
+        hidden_fields = self._extract_hidden_fields(soup)
+
+        payload = {
+            **hidden_fields,
+            self.locators.from_date_name: formatted_start,
+            self.locators.to_date_name: formatted_end,
+            self.locators.go_button_name: "Go",
+        }
+
+        post_response = self.session.post(
+            RBI_ARCHIVE_URL,
+            data=payload,
+            headers={"Referer": RBI_ARCHIVE_URL},
+            timeout=self.timeout,
+        )
+        post_response.raise_for_status()
+        return BeautifulSoup(post_response.text, "html.parser")
 
     def fetch_excel(self, start_date: date, end_date: date) -> Path:
-        """Download the Excel file for the provided date range."""
+        """Download RBI reference rates Excel for the given date range."""
 
         if start_date > end_date:
-            raise ValueError("start date must not exceed end date")
+            raise ValueError("start_date must not exceed end_date")
 
-        last_exception: Exception | None = None
-        for attempt in range(1, self.max_attempts + 1):
+        LOGGER.info("Downloading RBI rates from %s to %s", start_date, end_date)
+
+        attempt = 0
+        last_error: Exception | None = None
+        while attempt < self.max_attempts:
+            attempt += 1
             try:
-                self.driver.get(RBI_ARCHIVE_URL)
-                wait = WebDriverWait(self.driver, self.timeout)
-                self._wait_for_page_ready(wait)
-                self._fill_date_field(wait, start_date, self.locators.from_date_locators)
-                self._fill_date_field(wait, end_date, self.locators.to_date_locators)
-                go_button = self._wait_for_clickable(wait, self.locators.go_button_locators)
-                self._click_via_js(go_button)
-                download_link = self._wait_for_clickable(
-                    wait, self.locators.download_link_locators
-                )
-                self._click_via_js(download_link)
-                downloaded_file = self._wait_for_download()
-                safe_start = start_date.isoformat()
-                safe_end = end_date.isoformat()
-                final_name = (
-                    f"rbi_reference_rates_{safe_start}_to_{safe_end}{downloaded_file.suffix.lower()}"
-                )
-                final_path = downloaded_file.with_name(final_name)
-                if downloaded_file != final_path:
-                    downloaded_file.rename(final_path)
-                return final_path
-            except (TimeoutException, NoSuchElementException, RuntimeError) as exc:
-                last_exception = exc
+                result_soup = self._get_page_with_dates(start_date, end_date)
+                break
+            except Exception as exc:  # pragma: no cover - network dependent
+                last_error = exc
                 LOGGER.warning(
-                    "Attempt %s/%s to fetch RBI rates for %s-%s failed: %s",
+                    "Attempt %s/%s to download RBI rates failed: %s",
                     attempt,
                     self.max_attempts,
-                    start_date,
-                    end_date,
                     exc,
                 )
-                if attempt < self.max_attempts:
-                    time.sleep(self.retry_backoff * attempt)
+                if attempt >= self.max_attempts:
+                    raise
+                time.sleep(self.backoff_seconds * attempt)
 
-        raise TimeoutException(
-            f"Unable to download RBI forex rates for {start_date} to {end_date} after {self.max_attempts} attempts"
-        ) from last_exception
+        assert last_error is None  # for type checkers
+        result_soup = result_soup  # noqa: PLW0127 (redefinition for clarity)
+        link_tag = result_soup.find("a", id=self.locators.download_link_id)
+        if not link_tag or "href" not in link_tag.attrs:
+            raise RuntimeError(f"No Excel download link found for {start_date} – {end_date}")
 
-    def _fill_date_field(
-        self,
-        wait: WebDriverWait,
-        value: date,
-        locators: Sequence[tuple[str, str]],
-    ) -> None:
-        element = self._wait_for_any_locator(wait, locators)
-        formatted = value.strftime(self.date_format)
-        js_fill_date = """
-        const el = arguments[0];
-        el.removeAttribute('readonly');
-        el.value = arguments[1];
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        el.dispatchEvent(new Event('focus'));
-        el.dispatchEvent(new Event('blur'));
-        if (typeof window.jQuery !== 'undefined' && jQuery.ui && jQuery.ui.datepicker) {
-            jQuery(el).datepicker('setDate', arguments[1]);
-        }
-        """
-        self.driver.execute_script(js_fill_date, element, formatted)
+        excel_response = self._trigger_download(result_soup, link_tag["href"])
+        excel_response.raise_for_status()
 
-    def _wait_for_download(self) -> Path:
-        """Wait for Chrome to complete downloading the Excel file."""
+        filename = self._infer_filename(excel_response.headers.get("Content-Disposition", ""))
+        final_path = self.download_dir / filename
+        with open(final_path, "wb") as f:
+            for chunk in excel_response.iter_content(chunk_size=8192):
+                f.write(chunk)
 
-        partial_patterns = ("*.crdownload", "*.tmp")
-        valid_extensions = {".xls", ".xlsx", ".xlsm"}
+        LOGGER.info("Saved RBI Excel → %s", final_path)
+        return final_path.resolve()
 
-        def _download_ready(_: webdriver.Chrome) -> Path | bool:
-            files = [
-                item
-                for item in self.download_dir.iterdir()
-                if item.is_file() and item.suffix.lower() in valid_extensions
-            ]
-            partial = [
-                tmp for pattern in partial_patterns for tmp in self.download_dir.glob(pattern)
-            ]
-            if files and not partial:
-                return max(files, key=lambda p: p.stat().st_mtime)
-            return False
+    def _trigger_download(self, soup: "BeautifulSoup", href: str):
+        import requests
 
-        wait = WebDriverWait(self.driver, self.timeout, poll_frequency=1.0)
-        result = wait.until(_download_ready)
-        if isinstance(result, Path):
-            return result
-        raise RuntimeError("Download wait completed without returning a file path")
+        if href.startswith("javascript:"):
+            match = re.search(r"__doPostBack\('([^']+)','([^']*)'\)", href)
+            if not match:
+                raise RuntimeError("Failed to parse __doPostBack from download link")
+            target, arg = match.groups()
+            payload = {
+                "__EVENTTARGET": target,
+                "__EVENTARGUMENT": arg,
+                **self._extract_hidden_fields(soup),
+            }
+            return self.session.post(RBI_ARCHIVE_URL, data=payload, stream=True, timeout=self.timeout)
 
-    def _wait_for_page_ready(self, wait: WebDriverWait) -> None:
-        wait.until(lambda driver: driver.execute_script("return document.readyState") == "complete")
-        self._maybe_switch_to_form_frame()
-        self._wait_for_any_locator(wait, self.locators.from_date_locators)
+        excel_url = requests.compat.urljoin(RBI_ARCHIVE_URL, href)
+        return self.session.get(excel_url, stream=True, timeout=self.timeout)
 
-    def _maybe_switch_to_form_frame(self) -> None:
-        if self.locators.form_iframe_css:
-            frame = self.driver.find_element(By.CSS_SELECTOR, self.locators.form_iframe_css)
-            self.driver.switch_to.frame(frame)
-            return
-        if self._element_exists(self.locators.from_date_locators):
-            return
-        frames = self.driver.find_elements(By.TAG_NAME, "iframe")
-        for index, frame in enumerate(frames):
-            self.driver.switch_to.frame(frame)
-            if self._element_exists(self.locators.from_date_locators):
-                LOGGER.debug(
-                    "Switched to iframe %s for RBI reference rate form",
-                    frame.get_attribute("id") or frame.get_attribute("name") or str(index),
-                )
-                return
-            self.driver.switch_to.default_content()
-        self.driver.switch_to.default_content()
+    @staticmethod
+    def _infer_filename(content_disposition: str) -> str:
+        match = re.findall(r"filename=?\"?([^\"]+)\"?", content_disposition)
+        return match[0] if match else "rbi_reference_rates.xls"
 
-    def _element_exists(self, locators: Sequence[tuple[str, str]]) -> bool:
-        for locator in locators:
-            try:
-                self.driver.find_element(*locator)
-                return True
-            except NoSuchElementException:
-                continue
-        return False
+    @staticmethod
+    def _extract_hidden_fields(soup: "BeautifulSoup") -> dict[str, str]:
+        required = ["__VIEWSTATE", "__VIEWSTATEGENERATOR", "__EVENTVALIDATION"]
+        fields: dict[str, str] = {}
+        for name in required:
+            element = soup.find("input", {"name": name})
+            if not element or "value" not in element.attrs:
+                raise RuntimeError(f"Missing required form field: {name}")
+            fields[name] = element["value"]
+        return fields
 
-    def _wait_for_any_locator(
-        self, wait: WebDriverWait, locators: Sequence[tuple[str, str]]
-    ) -> WebElement:
-        def _locate(driver: webdriver.Chrome) -> WebElement | bool:
-            for locator in locators:
-                try:
-                    return driver.find_element(*locator)
-                except NoSuchElementException:
-                    continue
-            return False
+    def __enter__(self) -> "RBIRequestsClient":  # pragma: no cover - trivial
+        return self
 
-        result = wait.until(_locate)
-        if isinstance(result, WebElement):
-            return result
-        raise NoSuchElementException("Unable to locate any matching element")
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:  # pragma: no cover - trivial
+        return None
 
-    def _wait_for_clickable(
-        self, wait: WebDriverWait, locators: Sequence[tuple[str, str]]
-    ) -> WebElement:
-        def _locate(driver: webdriver.Chrome) -> WebElement | bool:
-            for locator in locators:
-                try:
-                    element = driver.find_element(*locator)
-                except NoSuchElementException:
-                    continue
-                if element.is_displayed() and element.is_enabled():
-                    return element
-            return False
 
-        result = wait.until(_locate)
-        if isinstance(result, WebElement):
-            return result
-        raise NoSuchElementException("Unable to locate a clickable element")
-
-    def _click_via_js(self, element: WebElement) -> None:
-        """Scroll the element into view and trigger a JavaScript click."""
-
-        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-        self.driver.execute_script("arguments[0].click();", element)
+# Backward compatible alias for older imports.
+RBISeleniumClient = RBIRequestsClient

@@ -45,6 +45,7 @@ __all__ = [
     "seed_sbi_today",
     "SQLiteManager",
     "PersistenceResult",
+    "RBIRequestsClient",
     "RBISeleniumClient",
 ]
 
@@ -678,12 +679,16 @@ class FxBharat:
 
 
 def __getattr__(name: str) -> Any:
-    """Lazily import heavy helpers to avoid mandatory Selenium installs."""
+    """Lazily import helpers to keep startup lightweight."""
 
     if name == "seed_rbi_forex":
         from fx_bharat.seeds.populate_rbi_forex import seed_rbi_forex as _seed
 
         return _seed
+    if name == "RBIRequestsClient":
+        from fx_bharat.ingestion.rbi_selenium import RBIRequestsClient as _client
+
+        return _client
     if name == "RBISeleniumClient":
         from fx_bharat.ingestion.rbi_selenium import RBISeleniumClient as _client
 

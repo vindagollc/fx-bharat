@@ -9,7 +9,7 @@ from pathlib import Path
 from fx_bharat.db import DEFAULT_SQLITE_DB_PATH
 from fx_bharat.db.sqlite_manager import PersistenceResult, SQLiteManager
 from fx_bharat.ingestion.rbi_csv import RBICSVParser
-from fx_bharat.ingestion.rbi_selenium import RBISeleniumClient
+from fx_bharat.ingestion.rbi_selenium import RBIRequestsClient
 from fx_bharat.ingestion.rbi_workbook import RBIWorkbookConverter
 from fx_bharat.utils.date_range import month_ranges, parse_date
 from fx_bharat.utils.logger import get_logger
@@ -35,7 +35,7 @@ def parse_args() -> argparse.Namespace:
         dest="headless",
         action="store_false",
         default=True,
-        help="Disable headless Chrome mode",
+        help="Deprecated: retained for compatibility (requests client ignores this flag)",
     )
     parser.add_argument("--download-dir", dest="download_dir", help="Optional download directory")
     parser.add_argument(
@@ -62,7 +62,7 @@ def seed_rbi_forex(
     end: str,
     *,
     db_path: str | Path = DEFAULT_SQLITE_DB_PATH,
-    headless: bool = True,
+    headless: bool | None = None,
     download_dir: str | Path | None = None,
     dry_run: bool = False,
 ) -> PersistenceResult:
@@ -71,6 +71,8 @@ def seed_rbi_forex(
     start_date = parse_date(start)
     end_date = parse_date(end)
     enforce_rbi_min_date(start_date, end_date)
+    if headless is not None:
+        LOGGER.debug("Ignoring headless flag; RBI downloads now use requests instead of Selenium")
     converter = RBIWorkbookConverter()
     csv_parser = RBICSVParser()
     date_chunks = list(month_ranges(start_date, end_date))
@@ -99,7 +101,7 @@ def seed_rbi_forex(
                 )
             return total
 
-        with RBISeleniumClient(download_dir=download_path, headless=headless) as client:
+        with RBIRequestsClient(download_dir=download_path) as client:
             for chunk in date_chunks:
                 adjusted_start = max(
                     chunk.start,

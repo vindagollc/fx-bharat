@@ -54,7 +54,7 @@ so the package is **immediately useful** with no setup required.
 
 FxBharat provides:
 
-* 🔄 Automated Selenium workflow to download daily reference rates
+* 🔄 Automated requests-based workflow to download daily reference rates
 * 📑 Parsing of RBI Excel/HTML into clean pandas DataFrames
 * 💾 Out-of-the-box storage via SQLite (bundled), PostgreSQL, MySQL/MariaDB, or MongoDB
 * 📈 Easy APIs to fetch latest rates or historical rollups
@@ -79,8 +79,8 @@ Coverage today:
 
 Workflow:
 
-1. **Selenium** downloads the RBI Excel/HTML reference rate workbook
-2. **BeautifulSoup4 + pandas** parse and normalize the data
+1. **Requests + BeautifulSoup4** simulate the RBI form submission and download the Excel workbook
+2. **pandas** parse and normalize the data
 3. **pypdf** parses SBI's Forex Card PDF when you opt into the SBI source
 4. **SQLAlchemy or PyMongo** persist these rows into your configured backend
 
@@ -98,9 +98,8 @@ pip install fx-bharat
 
 The installation includes:
 
-* Selenium
+* requests + BeautifulSoup4
 * pandas
-* BeautifulSoup4
 * SQLAlchemy
 * SQLite support
 
@@ -128,7 +127,7 @@ fx_bharat/
         mongo_backend.py      # MongoDB adapter via PyMongo
         sqlite_manager.py     # SQLite utilities + schema creation
     ingestion/
-        rbi_selenium.py       # Selenium automation
+        rbi_selenium.py       # Requests-based RBI downloader (no Selenium)
         rbi_workbook.py       # HTML/Excel → DataFrame converter
         rbi_csv.py            # Intermediate CSV helpers
         sbi_pdf.py            # SBI Forex Card PDF parser

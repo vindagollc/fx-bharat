@@ -13,9 +13,10 @@
 - Deprecated `.rates()` references  
 - Broken links & method typos  
 ### Changed
-- Improved ingestion resilience  
-- Incremental seeding  
-- CI coverage setup  
+- Improved ingestion resilience
+- Incremental seeding
+- CI coverage setup
+- Replaced Selenium-based RBI downloader with a lightweight requests client (backward compatible alias)
 
 ## [0.2.0] - 2025-11-20
 ### Added

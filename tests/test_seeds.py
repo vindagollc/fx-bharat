@@ -66,10 +66,9 @@ def test_seed_rbi_forex_coordinates_pipeline(
             return PersistenceResult(inserted=len(rows), updated=0)
 
     class DummyClient:
-        def __init__(self, *, download_dir: Path | None, headless: bool) -> None:
+        def __init__(self, *, download_dir: Path | None) -> None:
             self.download_dir = download_dir or tmp_path
             (self.download_dir).mkdir(parents=True, exist_ok=True)
-            self.headless = headless
 
         def __enter__(self) -> "DummyClient":
             return self
@@ -84,7 +83,7 @@ def test_seed_rbi_forex_coordinates_pipeline(
 
     monkeypatch.setattr(seeds_module, "RBIWorkbookConverter", lambda: DummyConverter())
     monkeypatch.setattr(seeds_module, "RBICSVParser", lambda: DummyParser())
-    monkeypatch.setattr(seeds_module, "RBISeleniumClient", DummyClient)
+    monkeypatch.setattr(seeds_module, "RBIRequestsClient", DummyClient)
     monkeypatch.setattr(seeds_module, "SQLiteManager", lambda db_path: DummyManager(Path(db_path)))
     monkeypatch.setattr(
         seeds_module,
@@ -122,10 +121,10 @@ def test_seed_rbi_forex_dry_run_skips_download(monkeypatch: pytest.MonkeyPatch, 
             raise AssertionError("insert_rates should not be called in dry_run")
 
     def _no_client(**kwargs):  # type: ignore[no-untyped-def]
-        raise AssertionError("RBISeleniumClient should not be instantiated during dry_run")
+        raise AssertionError("RBIRequestsClient should not be instantiated during dry_run")
 
     monkeypatch.setattr(seeds_module, "SQLiteManager", lambda db_path: DummyManager(Path(db_path)))
-    monkeypatch.setattr(seeds_module, "RBISeleniumClient", _no_client)
+    monkeypatch.setattr(seeds_module, "RBIRequestsClient", _no_client)
 
     result = seeds_module.seed_rbi_forex(
         "2024-01-01", "2024-01-31", db_path=tmp_path / "fx.db", dry_run=True
