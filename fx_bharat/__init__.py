@@ -351,12 +351,12 @@ class FxBharat:
 
             include_today = resolved_to >= today
             historical_end = today - timedelta(days=1) if include_today else resolved_to
-            start_date = from_date
-            if historical_end >= (start_date or historical_end):
+            sbi_start_date = from_date
+            if historical_end >= (sbi_start_date or historical_end):
                 seed_sbi_historical(
                     db_path=sqlite_db_path,
                     resource_dir=resource_dir or Path("resources"),
-                    start=start_date,
+                    start=sbi_start_date,
                     end=historical_end,
                     download=False,
                     incremental=incremental if not user_range_specified else False,
