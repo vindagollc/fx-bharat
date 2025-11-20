@@ -2,20 +2,18 @@ from datetime import date
 
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.2.0
+print(FxBharat.__version__)  # 0.3.0
 
 # Default Usage
 fx = FxBharat()
 
-# Latest Forex entry
-rate = fx.rate()
-print(rate)
-# => {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
+# Latest Forex entries
+rates = fx.rate()
+print(rates)
 
-# Specific Forex entry by date (optional rate_date)
-historical_rate = fx.rate(rate_date=date(2025, 11, 1))
-print(historical_rate)
-# => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
+# Specific Forex entries by date (optional rate_date)
+historical_rates = fx.rate(rate_date=date(2025, 11, 1))
+print(historical_rates)
 
 # weekly Forex entries
 history = fx.history(
@@ -24,7 +22,6 @@ history = fx.history(
     frequency="daily",
 )
 print(history[:2])
-# => [{'rate_date': date(2025, 11, 3), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # monthly Forex entries
 history = fx.history(
@@ -46,7 +43,7 @@ print(history)
 
 # Seed today's RBI + SBI Forex Card rates and fetch the latest snapshot
 fx.seed(resource_dir="resources")
-print(fx.rate(source="SBI"))
+print(fx.rate())
 
 # Seed historical RBI Forex rates for a specific window
 fx.seed_historical(from_date=date(2023, 1, 1), to_date=date(2023, 1, 31))

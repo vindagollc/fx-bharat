@@ -34,13 +34,16 @@ class MongoBackend(BackendStrategy):
         db = self._client.get_default_database() if database is None else self._client[database]
         if db is None:
             raise ValueError("MongoDB connection URI must include a database name")
-        self._collection: Collection = db["forex_rates"]
+        self._rbi_collection: Collection = db["forex_rates_rbi"]
+        self._sbi_collection: Collection = db["forex_rates_sbi"]
+        self._collection: Collection | None = None
 
     def ensure_schema(self) -> None:
         try:
-            LOGGER.info("Ensuring MongoDB forex_rates collection exists")
+            LOGGER.info("Ensuring MongoDB forex rate collections exist")
             self._client.admin.command("ping")
-            self._collection.create_index([("rate_date", 1), ("currency_code", 1)], unique=True)
+            self._rbi_collection.create_index([("rate_date", 1), ("currency_code", 1)], unique=True)
+            self._sbi_collection.create_index([("rate_date", 1), ("currency_code", 1)], unique=True)
         except PyMongoError as exc:  # pragma: no cover - error path
             raise RuntimeError(f"Failed to ensure MongoDB schema: {exc}") from exc
 
@@ -48,14 +51,15 @@ class MongoBackend(BackendStrategy):
         result = PersistenceResult()
         if not rows:
             return result
-        bulk_ops = []
+        rbi_ops: list[UpdateOne] = []
+        sbi_ops: list[UpdateOne] = []
         for row in rows:
+            target_ops = sbi_ops if (row.source or "RBI").upper() == "SBI" else rbi_ops
             doc = {
                 "rate_date": row.rate_date.isoformat(),
                 "currency_code": row.currency,
                 "rate": row.rate,
                 "base_currency": "INR",
-                "source": row.source,
                 "created_at": datetime.utcnow(),
             }
             optional_fields = {
@@ -71,7 +75,7 @@ class MongoBackend(BackendStrategy):
             for key, value in optional_fields.items():
                 if value is not None:
                     doc[key] = value
-            bulk_ops.append(
+            target_ops.append(
                 UpdateOne(
                     {
                         "rate_date": doc["rate_date"],
@@ -82,7 +86,16 @@ class MongoBackend(BackendStrategy):
                 )
             )
         try:
-            self._collection.bulk_write(bulk_ops, ordered=False)
+            rbi_collection = getattr(self, "_rbi_collection", None) or getattr(
+                self, "_collection", None
+            )
+            sbi_collection = getattr(self, "_sbi_collection", None) or getattr(
+                self, "_collection", None
+            )
+            if rbi_ops and rbi_collection is not None:
+                rbi_collection.bulk_write(rbi_ops, ordered=False)
+            if sbi_ops and sbi_collection is not None:
+                sbi_collection.bulk_write(sbi_ops, ordered=False)
             result.inserted += len(rows)
         except PyMongoError as exc:  # pragma: no cover - error path
             raise RuntimeError(f"Failed to insert MongoDB rates: {exc}") from exc
@@ -95,34 +108,51 @@ class MongoBackend(BackendStrategy):
         *,
         source: str | None = None,
     ) -> list[ForexRateRecord]:
-        query: dict[str, Any] = {}
-        if start is not None or end is not None:
-            range_query: dict[str, str] = {}
-            if start is not None:
-                range_query["$gte"] = start.isoformat()
-            if end is not None:
-                range_query["$lte"] = end.isoformat()
-            query["rate_date"] = range_query
-        if source is not None:
-            query["source"] = source
-        docs = self._collection.find(query).sort("rate_date", 1)
-        return [
-            ForexRateRecord(
-                rate_date=date.fromisoformat(doc["rate_date"]),
-                currency=doc["currency_code"],
-                rate=float(doc["rate"]),
-                source=doc.get("source", "RBI"),
-                tt_buy=doc.get("tt_buy"),
-                tt_sell=doc.get("tt_sell"),
-                bill_buy=doc.get("bill_buy"),
-                bill_sell=doc.get("bill_sell"),
-                travel_card_buy=doc.get("travel_card_buy"),
-                travel_card_sell=doc.get("travel_card_sell"),
-                cn_buy=doc.get("cn_buy"),
-                cn_sell=doc.get("cn_sell"),
-            )
-            for doc in docs
-        ]
+        def _collection_query(collection: Collection) -> list[ForexRateRecord]:
+            query: dict[str, Any] = {}
+            if start is not None or end is not None:
+                range_query: dict[str, str] = {}
+                if start is not None:
+                    range_query["$gte"] = start.isoformat()
+                if end is not None:
+                    range_query["$lte"] = end.isoformat()
+                query["rate_date"] = range_query
+            docs = collection.find(query).sort("rate_date", 1)
+            source_label = "RBI"
+            if getattr(collection, "name", "").endswith("sbi"):
+                source_label = "SBI"
+            return [
+                ForexRateRecord(
+                    rate_date=date.fromisoformat(doc["rate_date"]),
+                    currency=doc.get("currency_code", doc.get("currency", "")),
+                    rate=float(doc["rate"]),
+                    source=source_label,
+                    tt_buy=doc.get("tt_buy"),
+                    tt_sell=doc.get("tt_sell"),
+                    bill_buy=doc.get("bill_buy"),
+                    bill_sell=doc.get("bill_sell"),
+                    travel_card_buy=doc.get("travel_card_buy"),
+                    travel_card_sell=doc.get("travel_card_sell"),
+                    cn_buy=doc.get("cn_buy"),
+                    cn_sell=doc.get("cn_sell"),
+                )
+                for doc in docs
+            ]
+
+        records: list[ForexRateRecord] = []
+        sbi_collection = getattr(self, "_sbi_collection", None) or getattr(
+            self, "_collection", None
+        )
+        rbi_collection = getattr(self, "_rbi_collection", None) or getattr(
+            self, "_collection", None
+        )
+        if source is None or source.upper() == "SBI":
+            if sbi_collection is not None:
+                records.extend(_collection_query(sbi_collection))
+        if source is None or source.upper() == "RBI":
+            if rbi_collection is not None:
+                records.extend(_collection_query(rbi_collection))
+        return records
 
     def close(self) -> None:  # pragma: no cover - trivial cleanup
         self._client.close()

@@ -365,8 +365,10 @@ def _seed_sample_rates(fx: FxBharat) -> None:
 def test_rate_returns_latest_snapshot(sqlite_fx: FxBharat) -> None:
     _seed_sample_rates(sqlite_fx)
 
-    snapshot = sqlite_fx.rate()
+    snapshots = sqlite_fx.rate()
 
+    assert len(snapshots) == 1
+    snapshot = snapshots[0]
     assert snapshot["rate_date"] == date(2023, 2, 5)
     assert snapshot["base_currency"] == "INR"
     assert snapshot["source"] == "RBI"
@@ -376,14 +378,16 @@ def test_rate_returns_latest_snapshot(sqlite_fx: FxBharat) -> None:
 def test_rate_supports_specific_date(sqlite_fx: FxBharat) -> None:
     _seed_sample_rates(sqlite_fx)
 
-    snapshot = sqlite_fx.rate(date(2023, 1, 2))
+    snapshots = sqlite_fx.rate(date(2023, 1, 2))
 
+    assert len(snapshots) == 1
+    snapshot = snapshots[0]
     assert snapshot["rate_date"] == date(2023, 1, 2)
     assert snapshot["source"] == "RBI"
     assert snapshot["rates"] == {"USD": 83.0}
 
 
-def test_rate_filters_by_source(sqlite_fx: FxBharat) -> None:
+def test_rate_returns_both_sources(sqlite_fx: FxBharat) -> None:
     _seed_sample_rates(sqlite_fx)
     assert sqlite_fx.sqlite_manager is not None
     sqlite_fx.sqlite_manager.insert_rates(
@@ -393,11 +397,16 @@ def test_rate_filters_by_source(sqlite_fx: FxBharat) -> None:
         ]
     )
 
-    snapshot = sqlite_fx.rate(source="SBI")
+    snapshots = sqlite_fx.rate()
 
-    assert snapshot["rate_date"] == date(2023, 3, 1)
-    assert snapshot["source"] == "SBI"
-    assert snapshot["rates"] == {"EUR": 95.0, "USD": 90.0}
+    assert [snap["source"] for snap in snapshots] == ["SBI", "RBI"]
+    sbi_snapshot, rbi_snapshot = snapshots
+    assert sbi_snapshot["rate_date"] == date(2023, 3, 1)
+    assert sbi_snapshot["rates"]["USD"]["rate"] == 90.0
+    assert sbi_snapshot["rates"]["EUR"]["tt_sell"] is None or isinstance(
+        sbi_snapshot["rates"]["EUR"], dict
+    )
+    assert rbi_snapshot["source"] == "RBI"
 
 
 def test_rate_rejects_dates_before_rbi_minimum(sqlite_fx: FxBharat) -> None:

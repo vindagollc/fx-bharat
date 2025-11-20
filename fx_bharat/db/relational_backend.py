@@ -23,8 +23,19 @@ else:  # pragma: no cover - fallback type used at runtime
 
 LOGGER = get_logger(__name__)
 
-SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS forex_rates (
+SCHEMA_SQL_RBI = """
+CREATE TABLE IF NOT EXISTS forex_rates_rbi (
+    rate_date DATE NOT NULL,
+    currency_code VARCHAR(3) NOT NULL,
+    rate NUMERIC(18, 6) NOT NULL,
+    base_currency VARCHAR(3) NOT NULL DEFAULT 'INR',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(rate_date, currency_code)
+);
+"""
+
+SCHEMA_SQL_SBI = """
+CREATE TABLE IF NOT EXISTS forex_rates_sbi (
     rate_date DATE NOT NULL,
     currency_code VARCHAR(3) NOT NULL,
     rate NUMERIC(18, 6) NOT NULL,
@@ -37,23 +48,25 @@ CREATE TABLE IF NOT EXISTS forex_rates (
     travel_card_sell NUMERIC(18, 6) NULL,
     cn_buy NUMERIC(18, 6) NULL,
     cn_sell NUMERIC(18, 6) NULL,
-    source VARCHAR(255) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(rate_date, currency_code)
 );
 """
 
-DELETE_SQL = (
-    "DELETE FROM forex_rates WHERE rate_date = :rate_date AND currency_code = :currency_code"
+DELETE_RBI_SQL = (
+    "DELETE FROM forex_rates_rbi WHERE rate_date = :rate_date AND currency_code = :currency_code"
 )
-INSERT_SQL = """
-INSERT INTO forex_rates(rate_date, currency_code, rate, base_currency, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell, cn_buy, cn_sell, source, created_at)
-VALUES(:rate_date, :currency_code, :rate, :base_currency, :tt_buy, :tt_sell, :bill_buy, :bill_sell, :travel_card_buy, :travel_card_sell, :cn_buy, :cn_sell, :source, :created_at)
+DELETE_SBI_SQL = (
+    "DELETE FROM forex_rates_sbi WHERE rate_date = :rate_date AND currency_code = :currency_code"
+)
+INSERT_RBI_SQL = """
+INSERT INTO forex_rates_rbi(rate_date, currency_code, rate, base_currency, created_at)
+VALUES(:rate_date, :currency_code, :rate, :base_currency, :created_at)
 """
-SELECT_SQL = (
-    "SELECT rate_date, currency_code, rate, source, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell, cn_buy, cn_sell "
-    "FROM forex_rates ORDER BY rate_date"
-)
+INSERT_SBI_SQL = """
+INSERT INTO forex_rates_sbi(rate_date, currency_code, rate, base_currency, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell, cn_buy, cn_sell, created_at)
+VALUES(:rate_date, :currency_code, :rate, :base_currency, :tt_buy, :tt_sell, :bill_buy, :bill_sell, :travel_card_buy, :travel_card_sell, :cn_buy, :cn_sell, :created_at)
+"""
 
 
 class RelationalBackend(BackendStrategy):
@@ -79,7 +92,8 @@ class RelationalBackend(BackendStrategy):
         with engine.begin() as connection:
             LOGGER.info("Ensuring forex_rates schema exists")
             connection.execute(text("SELECT 1"))
-            connection.execute(text(SCHEMA_SQL))
+            connection.execute(text(SCHEMA_SQL_RBI))
+            connection.execute(text(SCHEMA_SQL_SBI))
 
     def insert_rates(self, rows: Sequence[ForexRateRecord]) -> PersistenceResult:
         result = PersistenceResult()
@@ -90,24 +104,32 @@ class RelationalBackend(BackendStrategy):
             raise ModuleNotFoundError("SQLAlchemy is required for relational backends")
         with engine.begin() as connection:
             for row in rows:
+                is_sbi = (row.source or "RBI").upper() == "SBI"
                 params = {
                     "rate_date": row.rate_date,
                     "currency_code": row.currency,
                     "rate": row.rate,
                     "base_currency": "INR",
-                    "tt_buy": row.tt_buy,
-                    "tt_sell": row.tt_sell,
-                    "bill_buy": row.bill_buy,
-                    "bill_sell": row.bill_sell,
-                    "travel_card_buy": row.travel_card_buy,
-                    "travel_card_sell": row.travel_card_sell,
-                    "cn_buy": row.cn_buy,
-                    "cn_sell": row.cn_sell,
-                    "source": row.source,
                     "created_at": datetime.utcnow(),
                 }
-                connection.execute(text(DELETE_SQL), params)
-                connection.execute(text(INSERT_SQL), params)
+                if is_sbi:
+                    params.update(
+                        {
+                            "tt_buy": row.tt_buy,
+                            "tt_sell": row.tt_sell,
+                            "bill_buy": row.bill_buy,
+                            "bill_sell": row.bill_sell,
+                            "travel_card_buy": row.travel_card_buy,
+                            "travel_card_sell": row.travel_card_sell,
+                            "cn_buy": row.cn_buy,
+                            "cn_sell": row.cn_sell,
+                        }
+                    )
+                    connection.execute(text(DELETE_SBI_SQL), params)
+                    connection.execute(text(INSERT_SBI_SQL), params)
+                else:
+                    connection.execute(text(DELETE_RBI_SQL), params)
+                    connection.execute(text(INSERT_RBI_SQL), params)
                 result.inserted += 1
         return result
 
@@ -118,46 +140,63 @@ class RelationalBackend(BackendStrategy):
         *,
         source: str | None = None,
     ) -> list[ForexRateRecord]:
-        where_clauses: list[str] = []
-        params: dict[str, object] = {}
-        if start is not None:
-            where_clauses.append("rate_date >= :start_date")
-            params["start_date"] = start
-        if end is not None:
-            where_clauses.append("rate_date <= :end_date")
-            params["end_date"] = end
-        if source:
-            where_clauses.append("source = :source")
-            params["source"] = source
-        query = SELECT_SQL
-        if where_clauses:
-            query = (
-                "SELECT rate_date, currency_code, rate, source, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell, cn_buy, cn_sell FROM forex_rates WHERE "
-                + " AND ".join(where_clauses)
-                + " ORDER BY rate_date"
-            )
         engine = self._get_engine()
         if text is None:  # pragma: no cover - defensive guard
             raise ModuleNotFoundError("SQLAlchemy is required for relational backends")
-        with engine.connect() as connection:
-            rows = connection.execute(text(query), params)
-            return [
-                ForexRateRecord(
-                    rate_date=_normalise_rate_date(row[0]),
-                    currency=row[1],
-                    rate=float(row[2]),
-                    source=row[3],
-                    tt_buy=row[4],
-                    tt_sell=row[5],
-                    bill_buy=row[6],
-                    bill_sell=row[7],
-                    travel_card_buy=row[8],
-                    travel_card_sell=row[9],
-                    cn_buy=row[10],
-                    cn_sell=row[11],
+
+        def _build_query(table: str) -> tuple[str, dict[str, object]]:
+            where_clauses: list[str] = []
+            params: dict[str, object] = {}
+            if start is not None:
+                where_clauses.append("rate_date >= :start_date")
+                params["start_date"] = start
+            if end is not None:
+                where_clauses.append("rate_date <= :end_date")
+                params["end_date"] = end
+            query = f"SELECT * FROM {table} ORDER BY rate_date"
+            if where_clauses:
+                query = (
+                    f"SELECT * FROM {table} WHERE "
+                    + " AND ".join(where_clauses)
+                    + " ORDER BY rate_date"
                 )
-                for row in rows
-            ]
+            return query, params
+
+        records: list[ForexRateRecord] = []
+        with engine.connect() as connection:
+            if source is None or source.upper() == "SBI":
+                query, params = _build_query("forex_rates_sbi")
+                for row in connection.execute(text(query), params):
+                    mapping = row._mapping
+                    records.append(
+                        ForexRateRecord(
+                            rate_date=_normalise_rate_date(mapping["rate_date"]),
+                            currency=mapping["currency_code"],
+                            rate=float(mapping["rate"]),
+                            source="SBI",
+                            tt_buy=mapping["tt_buy"],
+                            tt_sell=mapping["tt_sell"],
+                            bill_buy=mapping["bill_buy"],
+                            bill_sell=mapping["bill_sell"],
+                            travel_card_buy=mapping["travel_card_buy"],
+                            travel_card_sell=mapping["travel_card_sell"],
+                            cn_buy=mapping["cn_buy"],
+                            cn_sell=mapping["cn_sell"],
+                        )
+                    )
+            if source is None or source.upper() == "RBI":
+                query, params = _build_query("forex_rates_rbi")
+                for row in connection.execute(text(query), params):
+                    mapping = row._mapping
+                    records.append(
+                        ForexRateRecord(
+                            rate_date=_normalise_rate_date(mapping["rate_date"]),
+                            currency=mapping["currency_code"],
+                            rate=float(mapping["rate"]),
+                            source="RBI",
+                        )
+                    )
+        return records
 
     def close(self) -> None:  # pragma: no cover - trivial resource cleanup
         if self._engine_instance is not None:

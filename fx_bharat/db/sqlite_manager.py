@@ -25,13 +25,20 @@ else:  # pragma: no cover - module import time
     class Base(DeclarativeBase):
         pass
 
-    class _ForexRate(Base):
-        __tablename__ = "forex_rates"
+    class _RbiRate(Base):
+        __tablename__ = "forex_rates_rbi"
 
         rate_date = Column(Date, primary_key=True)
         currency = Column(String, primary_key=True)
         rate = Column(Float, nullable=False)
-        source = Column(String, nullable=False, default="RBI")
+        created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+
+    class _SbiRate(Base):
+        __tablename__ = "forex_rates_sbi"
+
+        rate_date = Column(Date, primary_key=True)
+        currency = Column(String, primary_key=True)
+        rate = Column(Float, nullable=False)
         tt_buy = Column(Float, nullable=True)
         tt_sell = Column(Float, nullable=True)
         bill_buy = Column(Float, nullable=True)
@@ -54,11 +61,18 @@ else:  # pragma: no cover - fallback stub
 
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS forex_rates (
+CREATE TABLE IF NOT EXISTS forex_rates_rbi (
     rate_date DATE NOT NULL,
     currency TEXT NOT NULL,
     rate REAL NOT NULL,
-    source TEXT NOT NULL DEFAULT 'RBI',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(rate_date, currency)
+);
+
+CREATE TABLE IF NOT EXISTS forex_rates_sbi (
+    rate_date DATE NOT NULL,
+    currency TEXT NOT NULL,
+    rate REAL NOT NULL,
     tt_buy REAL,
     tt_sell REAL,
     bill_buy REAL,
@@ -72,15 +86,25 @@ CREATE TABLE IF NOT EXISTS forex_rates (
 );
 """
 
-INSERT_IGNORE_STATEMENT = """
-INSERT OR IGNORE INTO forex_rates(rate_date, currency, rate, source, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell, cn_buy, cn_sell)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT_RBI_IGNORE_STATEMENT = """
+INSERT OR IGNORE INTO forex_rates_rbi(rate_date, currency, rate)
+VALUES(?, ?, ?);
 """
 
-UPDATE_STATEMENT = """
-UPDATE forex_rates
+INSERT_SBI_IGNORE_STATEMENT = """
+INSERT OR IGNORE INTO forex_rates_sbi(rate_date, currency, rate, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell, cn_buy, cn_sell)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+"""
+
+UPDATE_RBI_STATEMENT = """
+UPDATE forex_rates_rbi
+SET rate = ?
+WHERE rate_date = ? AND currency = ?;
+"""
+
+UPDATE_SBI_STATEMENT = """
+UPDATE forex_rates_sbi
 SET rate = ?,
-    source = ?,
     tt_buy = ?,
     tt_sell = ?,
     bill_buy = ?,
@@ -143,38 +167,52 @@ class _SQLAlchemyBackend:
         result = PersistenceResult()
         with self._SessionFactory() as session:
             for row in rows:
+                source = (row.source or "RBI").upper()
                 pk = {"rate_date": row.rate_date, "currency": row.currency}
-                existing = session.get(_ForexRate, pk)
-                if existing is None:
-                    session.add(
-                        _ForexRate(
-                            rate_date=row.rate_date,
-                            currency=row.currency,
-                            rate=row.rate,
-                            source=row.source,
-                            tt_buy=row.tt_buy,
-                            tt_sell=row.tt_sell,
-                            bill_buy=row.bill_buy,
-                            bill_sell=row.bill_sell,
-                            travel_card_buy=row.travel_card_buy,
-                            travel_card_sell=row.travel_card_sell,
-                            cn_buy=row.cn_buy,
-                            cn_sell=row.cn_sell,
+                if source == "SBI":
+                    sbi_existing = session.get(_SbiRate, pk)
+                    if sbi_existing is None:
+                        session.add(
+                            _SbiRate(
+                                rate_date=row.rate_date,
+                                currency=row.currency,
+                                rate=row.rate,
+                                tt_buy=row.tt_buy,
+                                tt_sell=row.tt_sell,
+                                bill_buy=row.bill_buy,
+                                bill_sell=row.bill_sell,
+                                travel_card_buy=row.travel_card_buy,
+                                travel_card_sell=row.travel_card_sell,
+                                cn_buy=row.cn_buy,
+                                cn_sell=row.cn_sell,
+                            )
                         )
-                    )
-                    result.inserted += 1
+                        result.inserted += 1
+                    else:
+                        setattr(sbi_existing, "rate", row.rate)
+                        setattr(sbi_existing, "tt_buy", row.tt_buy)
+                        setattr(sbi_existing, "tt_sell", row.tt_sell)
+                        setattr(sbi_existing, "bill_buy", row.bill_buy)
+                        setattr(sbi_existing, "bill_sell", row.bill_sell)
+                        setattr(sbi_existing, "travel_card_buy", row.travel_card_buy)
+                        setattr(sbi_existing, "travel_card_sell", row.travel_card_sell)
+                        setattr(sbi_existing, "cn_buy", row.cn_buy)
+                        setattr(sbi_existing, "cn_sell", row.cn_sell)
+                        result.updated += 1
                 else:
-                    setattr(existing, "rate", row.rate)
-                    setattr(existing, "source", row.source)
-                    setattr(existing, "tt_buy", row.tt_buy)
-                    setattr(existing, "tt_sell", row.tt_sell)
-                    setattr(existing, "bill_buy", row.bill_buy)
-                    setattr(existing, "bill_sell", row.bill_sell)
-                    setattr(existing, "travel_card_buy", row.travel_card_buy)
-                    setattr(existing, "travel_card_sell", row.travel_card_sell)
-                    setattr(existing, "cn_buy", row.cn_buy)
-                    setattr(existing, "cn_sell", row.cn_sell)
-                    result.updated += 1
+                    rbi_existing = session.get(_RbiRate, pk)
+                    if rbi_existing is None:
+                        session.add(
+                            _RbiRate(
+                                rate_date=row.rate_date,
+                                currency=row.currency,
+                                rate=row.rate,
+                            )
+                        )
+                        result.inserted += 1
+                    else:
+                        setattr(rbi_existing, "rate", row.rate)
+                        result.updated += 1
             session.commit()
         return result
 
@@ -188,35 +226,49 @@ class _SQLAlchemyBackend:
         *,
         source: str | None = None,
     ) -> list[ForexRateRecord]:
+        records: list[ForexRateRecord] = []
         with self._SessionFactory() as session:
-            stmt = select(_ForexRate).order_by(_ForexRate.rate_date)
-            if start is not None:
-                stmt = stmt.where(_ForexRate.rate_date >= start)
-            if end is not None:
-                stmt = stmt.where(_ForexRate.rate_date <= end)
-            if source is not None:
-                stmt = stmt.where(_ForexRate.source == source)
-            result = session.execute(stmt)
-            records: list[ForexRateRecord] = []
-            for row in result.scalars():
-                model = cast(_ForexRate, row)
-                records.append(
-                    ForexRateRecord(
-                        rate_date=cast(date, model.rate_date),
-                        currency=cast(str, model.currency),
-                        rate=cast(float, model.rate),
-                        source=cast(str, model.source),
-                        tt_buy=cast(float | None, model.tt_buy),
-                        tt_sell=cast(float | None, model.tt_sell),
-                        bill_buy=cast(float | None, model.bill_buy),
-                        bill_sell=cast(float | None, model.bill_sell),
-                        travel_card_buy=cast(float | None, model.travel_card_buy),
-                        travel_card_sell=cast(float | None, model.travel_card_sell),
-                        cn_buy=cast(float | None, model.cn_buy),
-                        cn_sell=cast(float | None, model.cn_sell),
+            if source is None or source.upper() == "SBI":
+                sbi_stmt = select(_SbiRate).order_by(_SbiRate.rate_date)
+                if start is not None:
+                    sbi_stmt = sbi_stmt.where(_SbiRate.rate_date >= start)
+                if end is not None:
+                    sbi_stmt = sbi_stmt.where(_SbiRate.rate_date <= end)
+                for sbi_row in session.execute(sbi_stmt).scalars():
+                    sbi_model = cast(_SbiRate, sbi_row)
+                    records.append(
+                        ForexRateRecord(
+                            rate_date=cast(date, sbi_model.rate_date),
+                            currency=cast(str, sbi_model.currency),
+                            rate=cast(float, sbi_model.rate),
+                            source="SBI",
+                            tt_buy=cast(float | None, sbi_model.tt_buy),
+                            tt_sell=cast(float | None, sbi_model.tt_sell),
+                            bill_buy=cast(float | None, sbi_model.bill_buy),
+                            bill_sell=cast(float | None, sbi_model.bill_sell),
+                            travel_card_buy=cast(float | None, sbi_model.travel_card_buy),
+                            travel_card_sell=cast(float | None, sbi_model.travel_card_sell),
+                            cn_buy=cast(float | None, sbi_model.cn_buy),
+                            cn_sell=cast(float | None, sbi_model.cn_sell),
+                        )
                     )
-                )
-            return records
+            if source is None or source.upper() == "RBI":
+                rbi_stmt = select(_RbiRate).order_by(_RbiRate.rate_date)
+                if start is not None:
+                    rbi_stmt = rbi_stmt.where(_RbiRate.rate_date >= start)
+                if end is not None:
+                    rbi_stmt = rbi_stmt.where(_RbiRate.rate_date <= end)
+                for rbi_row in session.execute(rbi_stmt).scalars():
+                    rbi_model = cast(_RbiRate, rbi_row)
+                    records.append(
+                        ForexRateRecord(
+                            rate_date=cast(date, rbi_model.rate_date),
+                            currency=cast(str, rbi_model.currency),
+                            rate=cast(float, rbi_model.rate),
+                            source="RBI",
+                        )
+                    )
+        return records
 
     def close(self) -> None:  # pragma: no cover - trivial
         self.engine.dispose()
@@ -230,51 +282,71 @@ class _SQLiteFallbackBackend:
         self._connection = sqlite3.connect(self.db_path)
         self._connection.execute("PRAGMA foreign_keys = ON")
         self._connection.row_factory = sqlite3.Row
-        self._connection.execute(SCHEMA)
+        self._connection.executescript(SCHEMA)
         self._connection.commit()
 
     def insert_rates(self, rows: Sequence[ForexRateRecord]) -> PersistenceResult:
         result = PersistenceResult()
         with self._connection:
             for row in rows:
-                inserted = self._connection.execute(
-                    INSERT_IGNORE_STATEMENT,
-                    (
-                        row.rate_date.isoformat(),
-                        row.currency,
-                        row.rate,
-                        row.source,
-                        row.tt_buy,
-                        row.tt_sell,
-                        row.bill_buy,
-                        row.bill_sell,
-                        row.travel_card_buy,
-                        row.travel_card_sell,
-                        row.cn_buy,
-                        row.cn_sell,
-                    ),
-                ).rowcount
-                if inserted:
-                    result.inserted += inserted
-                    continue
-                updated = self._connection.execute(
-                    UPDATE_STATEMENT,
-                    (
-                        row.rate,
-                        row.source,
-                        row.tt_buy,
-                        row.tt_sell,
-                        row.bill_buy,
-                        row.bill_sell,
-                        row.travel_card_buy,
-                        row.travel_card_sell,
-                        row.cn_buy,
-                        row.cn_sell,
-                        row.rate_date.isoformat(),
-                        row.currency,
-                    ),
-                ).rowcount
-                result.updated += updated
+                if (row.source or "RBI").upper() == "SBI":
+                    inserted = self._connection.execute(
+                        INSERT_SBI_IGNORE_STATEMENT,
+                        (
+                            row.rate_date.isoformat(),
+                            row.currency,
+                            row.rate,
+                            row.tt_buy,
+                            row.tt_sell,
+                            row.bill_buy,
+                            row.bill_sell,
+                            row.travel_card_buy,
+                            row.travel_card_sell,
+                            row.cn_buy,
+                            row.cn_sell,
+                        ),
+                    ).rowcount
+                    if inserted:
+                        result.inserted += inserted
+                        continue
+                    updated = self._connection.execute(
+                        UPDATE_SBI_STATEMENT,
+                        (
+                            row.rate,
+                            row.tt_buy,
+                            row.tt_sell,
+                            row.bill_buy,
+                            row.bill_sell,
+                            row.travel_card_buy,
+                            row.travel_card_sell,
+                            row.cn_buy,
+                            row.cn_sell,
+                            row.rate_date.isoformat(),
+                            row.currency,
+                        ),
+                    ).rowcount
+                    result.updated += updated
+                else:
+                    inserted = self._connection.execute(
+                        INSERT_RBI_IGNORE_STATEMENT,
+                        (
+                            row.rate_date.isoformat(),
+                            row.currency,
+                            row.rate,
+                        ),
+                    ).rowcount
+                    if inserted:
+                        result.inserted += inserted
+                        continue
+                    updated = self._connection.execute(
+                        UPDATE_RBI_STATEMENT,
+                        (
+                            row.rate,
+                            row.rate_date.isoformat(),
+                            row.currency,
+                        ),
+                    ).rowcount
+                    result.updated += updated
         return result
 
     def fetch_all(self) -> list[ForexRateRecord]:
@@ -287,42 +359,58 @@ class _SQLiteFallbackBackend:
         *,
         source: str | None = None,
     ) -> list[ForexRateRecord]:
-        clauses: list[str] = []
-        params: list[str] = []
-        if start is not None:
-            clauses.append("rate_date >= ?")
-            params.append(start.isoformat())
-        if end is not None:
-            clauses.append("rate_date <= ?")
-            params.append(end.isoformat())
-        if source is not None:
-            clauses.append("source = ?")
-            params.append(source)
-        where = ""
-        if clauses:
-            where = " WHERE " + " AND ".join(clauses)
-        query = (
-            "SELECT rate_date, currency, rate, source, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell, cn_buy, cn_sell FROM forex_rates"
-            f"{where} ORDER BY rate_date"
-        )
-        cursor = self._connection.execute(query, params)
-        return [
-            ForexRateRecord(
-                rate_date=date.fromisoformat(row["rate_date"]),
-                currency=row["currency"],
-                rate=row["rate"],
-                source=row["source"],
-                tt_buy=row["tt_buy"],
-                tt_sell=row["tt_sell"],
-                bill_buy=row["bill_buy"],
-                bill_sell=row["bill_sell"],
-                travel_card_buy=row["travel_card_buy"],
-                travel_card_sell=row["travel_card_sell"],
-                cn_buy=row["cn_buy"],
-                cn_sell=row["cn_sell"],
+        def _build_query(table: str) -> tuple[str, list[str]]:
+            clauses: list[str] = []
+            params: list[str] = []
+            if start is not None:
+                clauses.append("rate_date >= ?")
+                params.append(start.isoformat())
+            if end is not None:
+                clauses.append("rate_date <= ?")
+                params.append(end.isoformat())
+            where = ""
+            if clauses:
+                where = " WHERE " + " AND ".join(clauses)
+            return (
+                f"SELECT * FROM {table}{where} ORDER BY rate_date",
+                params,
             )
-            for row in cursor.fetchall()
-        ]
+
+        records: list[ForexRateRecord] = []
+
+        if source is None or source.upper() == "SBI":
+            query, params = _build_query("forex_rates_sbi")
+            for row in self._connection.execute(query, params).fetchall():
+                records.append(
+                    ForexRateRecord(
+                        rate_date=date.fromisoformat(row["rate_date"]),
+                        currency=row["currency"],
+                        rate=row["rate"],
+                        source="SBI",
+                        tt_buy=row["tt_buy"],
+                        tt_sell=row["tt_sell"],
+                        bill_buy=row["bill_buy"],
+                        bill_sell=row["bill_sell"],
+                        travel_card_buy=row["travel_card_buy"],
+                        travel_card_sell=row["travel_card_sell"],
+                        cn_buy=row["cn_buy"],
+                        cn_sell=row["cn_sell"],
+                    )
+                )
+
+        if source is None or source.upper() == "RBI":
+            query, params = _build_query("forex_rates_rbi")
+            for row in self._connection.execute(query, params).fetchall():
+                records.append(
+                    ForexRateRecord(
+                        rate_date=date.fromisoformat(row["rate_date"]),
+                        currency=row["currency"],
+                        rate=row["rate"],
+                        source="RBI",
+                    )
+                )
+
+        return records
 
     def close(self) -> None:  # pragma: no cover - trivial
         self._connection.close()

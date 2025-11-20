@@ -2,7 +2,7 @@ from datetime import date
 
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.2.0
+print(FxBharat.__version__)  # 0.3.0
 
 # MongoDB Usage
 fx = FxBharat(db_config="mongodb://127.0.0.1:27017/forex")
@@ -14,15 +14,13 @@ if not success:
 
 fx.migrate()  # =>  will migrate the date from Sqlite to MongoDB
 
-# Latest Forex entry
+# Latest Forex entries
 rate = fx.rate()
 print(rate)
-# => {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
 
 # Specific Forex entry by date (optional rate_date)
 historical_rate = fx.rate(rate_date=date(2025, 11, 1))
 print(historical_rate)
-# => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
 
 # weekly Forex entries
 history = fx.history(
@@ -31,7 +29,6 @@ history = fx.history(
     frequency="daily",
 )
 print(history[:2])
-# => [{'rate_date': date(2025, 11, 3), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # monthly Forex entries
 history = fx.history(
@@ -40,7 +37,6 @@ history = fx.history(
     frequency="monthly",
 )
 print(history)
-# => [{'rate_date': date(2025, 9, 30), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # yearly Forex entries
 history = fx.history(
@@ -49,10 +45,9 @@ history = fx.history(
     frequency="yearly",
 )
 print(history)
-# => [{'rate_date': date(2023, 12, 29), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # SBI Forex Card rates can also be mirrored into MongoDB after parsing the PDF
 fx.seed(resource_dir="resources")
-print(fx.rate(source="SBI"))
+print(fx.rate())
 
 fx.seed_historical(from_date=date(2023, 1, 1), to_date=date(2023, 1, 31))

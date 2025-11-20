@@ -148,15 +148,18 @@ from fx_bharat import FxBharat
 
 fx = FxBharat()  # Uses bundled SQLite forex.db
 
-# Update today's RBI rates (default source)
-fx.seed(from_date=date.today(), to_date=date.today())
+# Insert today's RBI + SBI data
+fx.seed()
 
-# Get latest available snapshot
+# Get latest available snapshots (SBI first, then RBI)
 latest = fx.rate()
 print(latest)
-# => {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
+# => [
+#   {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'source': 'SBI', 'rates': {...}},
+#   {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}},
+# ]
 
-# Get a specific day's snapshot (optional `rate_date`)
+# Get a specific day's snapshots (optional `rate_date`)
 print(fx.rate(rate_date=date(2025, 11, 1)))
 
 # Fetch a historical window
@@ -169,7 +172,7 @@ for snapshot in history:
 ### What these methods do:
 
 * `.seed(start_date, end_date)` → Downloads & inserts missing entries
-* `.rate(rate_date=None)` → Returns **latest available** FX observation (or a specific `rate_date` if provided)
+* `.rate(rate_date=None)` → Returns **latest available** SBI and RBI observations (or specific `rate_date` snapshots) with SBI first
 * `.history(start, end, frequency)` → Supports
 
   * `"daily"`
@@ -187,25 +190,22 @@ for snapshot in history:
 from datetime import date
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.2.0
+print(FxBharat.__version__)  # 0.3.0
 
 # Default Usage
 fx = FxBharat()
 
-# Latest Forex entry
-rate = fx.rate()
-print(rate)
-# => {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
+# Latest Forex entries (SBI then RBI if available)
+rates = fx.rate()
+print(rates)
 
-# Specific Forex entry by date (optional rate_date)
-historical_rate = fx.rate(rate_date=date(2025, 11, 1))
-print(historical_rate)
-# => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
+# Specific Forex entries by date (optional rate_date)
+historical_rates = fx.rate(rate_date=date(2025, 11, 1))
+print(historical_rates)
 
-# Daily Forex entries
+# Daily Forex entries (SBI first, then RBI snapshots)
 rates = fx.history(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
 print(rates[:2])
-# => [{'rate_date': datetime.date(2025, 11, 3), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # Monthly Forex entries
 monthly_rates = fx.history(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
@@ -215,36 +215,12 @@ print(monthly_rates)
 yearly_rates = fx.history(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
 print(yearly_rates)
 
-fx.seed(from_date=date.today(), to_date=date.today())
+fx.seed()
 ```
 
 ## Source Selection (RBI vs SBI)
 
-FxBharat keeps a `source` column on every row and lets you decide which feed to ingest or query:
-
-```python
-from datetime import date
-from fx_bharat import FxBharat
-
-fx = FxBharat()
-
-# Backfill RBI data (default)
-fx.seed(from_date=date(2025, 11, 1), to_date=date(2025, 11, 18))
-
-# Backfill SBI Forex Card rates directly from the official PDF
-fx.seed(
-    from_date=date(2025, 11, 1),
-    to_date=date(2025, 11, 18),
-    source="SBI",
-    # download_latest=True downloads the live PDF before parsing
-)
-
-# Fetch latest SBI snapshot
-print(fx.rate(source="SBI"))
-
-# Fetch RBI weekly snapshots (explicit source argument)
-print(fx.history(date(2025, 10, 1), date(2025, 10, 31), frequency="weekly", source="RBI"))
-```
+FxBharat now stores RBI and SBI data in **separate tables/collections**. Query helpers always return SBI snapshots first (when present) followed by RBI snapshots. Use `seed_historical(..., source="RBI" | "SBI")` to ingest archival PDFs for a specific source; `seed()` pulls both sources for the current day and saves the SBI PDF into `resources/`.
 
 ## **2. Connecting to Your Own Database**
 
@@ -298,31 +274,24 @@ rate = fx.rate()
 print(rate)
 # => {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
 
-# Specific Forex entry by date (optional rate_date)
-historical_rate = fx.rate(rate_date=date(2025, 11, 1))
-print(historical_rate)
-# => {'rate_date': datetime.date(2025, 11, 1), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}
+# Specific Forex entries by date (optional rate_date)
+historical_rates = fx.rate(rate_date=date(2025, 11, 1))
+print(historical_rates)
 
-# weekly Forex entries
+# Weekly/daily Forex entries (SBI first, then RBI)
 rates = fx.history(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
 print(rates[:2])
-# => [{'rate_date': datetime.date(2025, 11, 3), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
-# monthly Forex entries
+# Monthly Forex entries
 rates = fx.history(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
 print(rates)
-# => [{'rate_date': datetime.date(2025, 9, 30), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
-# yearly Forex entries
+# Yearly Forex entries
 rates = fx.history(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
 print(rates)
-# => [{'rate_date': datetime.date(2023, 12, 29), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
-# Seed SBI Forex Card rates into PostgreSQL as well
-fx.seed(from_date=date.today(), to_date=date.today(), source="SBI")
-print(fx.rate(source="SBI"))
-
-fx.seed(from_date=date.today(), to_date=date.today())
+# Seed SBI + RBI Forex rates into PostgreSQL as well
+fx.seed()
 ```
 
 ### Example: MySQL/MariaDB
@@ -367,10 +336,10 @@ print(rates)
 # => [{'rate_date': datetime.date(2023, 12, 29), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # Seed SBI Forex Card rates into MySQL as well
-fx.seed(from_date=date.today(), to_date=date.today(), source="SBI")
-print(fx.rate(source="SBI"))
+fx.seed()
+print(fx.rate())
 
-fx.seed(from_date=date.today(), to_date=date.today())
+fx.seed()
 ```
 
 ### Example: MongoDB
@@ -415,10 +384,10 @@ print(rates)
 # => [{'rate_date': datetime.date(2023, 12, 29), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}}, ...]
 
 # Seed SBI Forex Card rates into MongoDB as well
-fx.seed(from_date=date.today(), to_date=date.today(), source="SBI")
-print(fx.rate(source="SBI"))
+fx.seed()
+print(fx.rate())
 
-fx.seed(from_date=date.today(), to_date=date.today())
+fx.seed()
 ```
 
 FxBharat internally sanitizes the DSN to satisfy PyMongo.

@@ -50,7 +50,7 @@ __all__ = [
 try:
     __version__ = importlib_metadata.version("fx-bharat")
 except importlib_metadata.PackageNotFoundError:  # pragma: no cover - fallback for local runs
-    __version__ = "0.2.0"
+    __version__ = "0.3.0"
 
 
 def seed_rbi_forex(*args, **kwargs):
@@ -388,34 +388,31 @@ class FxBharat:
             target_backend.ensure_schema()
             target_backend.insert_rates(rows)
 
-    def rate(self, rate_date: date | None = None, *, source: str = "RBI") -> Dict[str, Any]:
+    def rate(self, rate_date: date | None = None) -> List[Dict[str, Any]]:
         """Return a forex rate snapshot for ``rate_date`` or the latest entry."""
 
         backend = self._get_backend_strategy()
-        source_upper = source.upper()
-        if rate_date is not None:
-            if source_upper == "RBI":
+        snapshots: List[Dict[str, Any]] = []
+
+        for source in ("SBI", "RBI"):
+            if rate_date is not None and source == "RBI":
                 enforce_rbi_min_date(rate_date)
-            grouped = self._group_rows_by_date(
-                backend.fetch_range(rate_date, rate_date, source=source_upper)
+            rows = (
+                backend.fetch_range(rate_date, rate_date, source=source)
+                if rate_date is not None
+                else backend.fetch_range(source=source)
             )
-        else:
-            grouped = self._group_rows_by_date(backend.fetch_range(source=source_upper))
-        if not grouped:
-            return {}
-        target_date = rate_date if rate_date is not None else max(grouped.keys())
-        snapshot = grouped.get(target_date)
-        if snapshot is None:
-            return {}
-        return self._snapshot_payload(target_date, snapshot, source_upper)
+            snapshot = self._latest_snapshot_from_rows(rows, rate_date, source)
+            if snapshot:
+                snapshots.append(snapshot)
+
+        return snapshots
 
     def history(
         self,
         from_date: date,
         to_date: date,
         frequency: Literal["daily", "weekly", "monthly", "yearly"] = "daily",
-        *,
-        source: str = "RBI",
     ) -> List[Dict[str, Any]]:
         """Return forex rate snapshots within ``from_date``/``to_date``.
 
@@ -428,35 +425,39 @@ class FxBharat:
         freq = frequency.lower()
         if freq not in {"daily", "weekly", "monthly", "yearly"}:
             raise ValueError("frequency must be one of: daily, weekly, monthly, yearly")
-        if source.upper() == "RBI":
-            enforce_rbi_min_date(from_date, to_date)
-        rows = self._get_backend_strategy().fetch_range(from_date, to_date, source=source.upper())
-        grouped = self._group_rows_by_date(rows)
-        if not grouped:
-            return []
-        sorted_dates = sorted(grouped.keys())
-        selected = self._select_snapshot_dates(sorted_dates, freq)
-        return [self._snapshot_payload(day, grouped[day], source.upper()) for day in selected]
+        snapshots: List[Dict[str, Any]] = []
+        backend = self._get_backend_strategy()
+
+        for source in ("SBI", "RBI"):
+            if source == "RBI":
+                enforce_rbi_min_date(from_date, to_date)
+            rows = backend.fetch_range(from_date, to_date, source=source)
+            grouped = self._group_rows_by_date(rows)
+            if not grouped:
+                continue
+            sorted_dates = sorted(grouped.keys())
+            selected = self._select_snapshot_dates(sorted_dates, freq)
+            snapshots.extend(
+                [self._snapshot_payload(day, grouped[day], source) for day in selected]
+            )
+
+        return snapshots
 
     def historical(
         self,
         from_date: date,
         to_date: date,
         frequency: Literal["daily", "weekly", "monthly", "yearly"] = "daily",
-        *,
-        source: str = "RBI",
     ) -> List[Dict[str, Any]]:
         """Alias for :meth:`history` for readability."""
 
-        return self.history(from_date, to_date, frequency=frequency, source=source)
+        return self.history(from_date, to_date, frequency=frequency)
 
     def rates(
         self,
         from_date: date,
         to_date: date,
         frequency: Literal["daily", "weekly", "monthly", "yearly"] = "daily",
-        *,
-        source: str = "RBI",
     ) -> List[Dict[str, Any]]:
         """Deprecated alias; use :meth:`history` instead."""
 
@@ -465,25 +466,60 @@ class FxBharat:
             DeprecationWarning,
             stacklevel=2,
         )
-        return self.history(from_date, to_date, frequency=frequency, source=source)
+        return self.history(from_date, to_date, frequency=frequency)
 
     @staticmethod
     def _group_rows_by_date(
         rows: Iterable[ForexRateRecord],
-    ) -> Dict[date, Dict[str, float]]:
-        grouped: Dict[date, Dict[str, float]] = {}
+    ) -> Dict[date, List[ForexRateRecord]]:
+        grouped: Dict[date, List[ForexRateRecord]] = {}
         for row in rows:
-            bucket = grouped.setdefault(row.rate_date, {})
-            bucket[row.currency] = row.rate
+            grouped.setdefault(row.rate_date, []).append(row)
         return grouped
 
     @staticmethod
-    def _snapshot_payload(rate_date: date, rates: Dict[str, float], source: str) -> Dict[str, Any]:
+    def _latest_snapshot_from_rows(
+        rows: Iterable[ForexRateRecord],
+        rate_date: date | None,
+        source: str,
+    ) -> Dict[str, Any] | None:
+        grouped = FxBharat._group_rows_by_date(rows)
+        if not grouped:
+            return None
+        target_date = rate_date if rate_date is not None else max(grouped.keys())
+        snapshot = grouped.get(target_date)
+        if snapshot is None:
+            return None
+        return FxBharat._snapshot_payload(target_date, snapshot, source)
+
+    @staticmethod
+    def _snapshot_payload(
+        rate_date: date, rates: List[ForexRateRecord], source: str
+    ) -> Dict[str, Any]:
+        ordered_rates: Dict[str, Any]
+        if source.upper() == "SBI":
+            payload_rates: Dict[str, Dict[str, float | None]] = {}
+            for row in rates:
+                payload_rates[row.currency] = {
+                    "rate": row.rate,
+                    "tt_buy": row.tt_buy,
+                    "tt_sell": row.tt_sell,
+                    "bill_buy": row.bill_buy,
+                    "bill_sell": row.bill_sell,
+                    "travel_card_buy": row.travel_card_buy,
+                    "travel_card_sell": row.travel_card_sell,
+                    "cn_buy": row.cn_buy,
+                    "cn_sell": row.cn_sell,
+                }
+            ordered_rates = dict(sorted(payload_rates.items()))
+        else:
+            ordered_rates = dict(sorted({row.currency: row.rate for row in rates}.items()))
+
         return {
             "rate_date": rate_date,
             "base_currency": "INR",
             "source": source,
-            "rates": dict(sorted(rates.items())),
+            "rates": ordered_rates,
         }
 
     @staticmethod
