@@ -431,10 +431,19 @@ pip install pymongo
 # **Running Tests**
 
 ```bash
-python -m unittest discover -s tests -v
+pytest
 ```
 
-All tests use the standard library `unittest`.
+To collect coverage with the built-in settings:
+
+```bash
+pytest --cov=fx_bharat --cov-report=term-missing
+coverage report
+```
+
+If you prefer `coverage run`, make sure you do **not** also pass `--cov` to pytest; running both
+simultaneously can zero-out the generated `.coverage` file and lead to the 0% report seen in CI.
+
 
 ---
 
