@@ -13,4 +13,3 @@ if not success:
     exit(1)
 
 fx.migrate()  # =>  will migrate the date from Sqlite to MongoDB
-
