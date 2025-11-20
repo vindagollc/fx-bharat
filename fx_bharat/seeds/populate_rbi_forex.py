@@ -9,7 +9,7 @@ from pathlib import Path
 from fx_bharat.db import DEFAULT_SQLITE_DB_PATH
 from fx_bharat.db.sqlite_manager import PersistenceResult, SQLiteManager
 from fx_bharat.ingestion.rbi_csv import RBICSVParser
-from fx_bharat.ingestion.rbi_selenium import RBIRequestsClient
+from fx_bharat.ingestion.rbi_requests import RBIRequestsClient
 from fx_bharat.ingestion.rbi_workbook import RBIWorkbookConverter
 from fx_bharat.utils.date_range import month_ranges, parse_date
 from fx_bharat.utils.logger import get_logger

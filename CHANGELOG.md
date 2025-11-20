@@ -17,6 +17,7 @@
 - Incremental seeding
 - CI coverage setup
 - Replaced Selenium-based RBI downloader with a lightweight requests client (backward compatible alias)
+- Renamed the RBI ingestion module to `rbi_requests.py` to reflect the Selenium-free workflow
 
 ## [0.2.0] - 2025-11-20
 ### Added

@@ -686,11 +686,11 @@ def __getattr__(name: str) -> Any:
 
         return _seed
     if name == "RBIRequestsClient":
-        from fx_bharat.ingestion.rbi_selenium import RBIRequestsClient as _client
+        from fx_bharat.ingestion.rbi_requests import RBIRequestsClient as _client
 
         return _client
     if name == "RBISeleniumClient":
-        from fx_bharat.ingestion.rbi_selenium import RBISeleniumClient as _client
+        from fx_bharat.ingestion.rbi_requests import RBISeleniumClient as _client
 
         return _client
     raise AttributeError(f"module 'fx_bharat' has no attribute {name}")

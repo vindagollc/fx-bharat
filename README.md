@@ -127,7 +127,7 @@ fx_bharat/
         mongo_backend.py      # MongoDB adapter via PyMongo
         sqlite_manager.py     # SQLite utilities + schema creation
     ingestion/
-        rbi_selenium.py       # Requests-based RBI downloader (no Selenium)
+        rbi_requests.py       # Requests-based RBI downloader (no Selenium)
         rbi_workbook.py       # HTML/Excel → DataFrame converter
         rbi_csv.py            # Intermediate CSV helpers
         sbi_pdf.py            # SBI Forex Card PDF parser
