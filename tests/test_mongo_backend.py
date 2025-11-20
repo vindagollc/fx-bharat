@@ -26,6 +26,9 @@ class _DummyCollection:
         self.docs: Dict[tuple[str, str], Dict[str, Any]] = {}
         self.indexes: list[tuple[tuple[tuple[str, int], ...], bool]] = []
 
+    def __bool__(self) -> bool:  # pragma: no cover - behavioural parity with pymongo
+        raise NotImplementedError("Collection truthiness is undefined")
+
     def create_index(self, fields: list[tuple[str, int]], unique: bool) -> None:
         self.indexes.append((tuple(fields), unique))
 

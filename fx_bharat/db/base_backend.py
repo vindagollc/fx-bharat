@@ -26,6 +26,8 @@ class BackendStrategy(ABC):
         self,
         start: date | None = None,
         end: date | None = None,
+        *,
+        source: str | None = None,
     ) -> list[ForexRateRecord]:
         """Return forex rates constrained by the provided dates."""
 
