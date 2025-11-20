@@ -41,13 +41,20 @@ def parse_args() -> argparse.Namespace:
         dest="end",
         help="Optional end date (YYYY-MM-DD) used to filter resource PDFs",
     )
-    parser.add_argument(
+    download_group = parser.add_mutually_exclusive_group()
+    download_group.add_argument(
+        "--download-latest",
+        dest="download",
+        action="store_true",
+        help="Download and insert the latest SBI PDF (ignored when a date range is provided)",
+    )
+    download_group.add_argument(
         "--skip-download",
         dest="download",
         action="store_false",
-        default=True,
         help="Do not fetch the latest PDF from SBI before inserting",
     )
+    parser.set_defaults(download=False)
     return parser.parse_args()
 
 
@@ -80,7 +87,7 @@ def seed_sbi_forex(
     downloader = SBIPDFDownloader()
     resources_root = Path(resource_dir)
     pending: list[Path] = list(_iter_pdf_paths(resources_root, start, end))
-    if download:
+    if download and start is None and end is None:
         pending.append(downloader.fetch_latest())
 
     total = PersistenceResult()

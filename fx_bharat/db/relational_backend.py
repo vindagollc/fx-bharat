@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS forex_rates (
     bill_sell NUMERIC(18, 6) NULL,
     travel_card_buy NUMERIC(18, 6) NULL,
     travel_card_sell NUMERIC(18, 6) NULL,
+    cn_buy NUMERIC(18, 6) NULL,
+    cn_sell NUMERIC(18, 6) NULL,
     source VARCHAR(255) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(rate_date, currency_code)
@@ -45,11 +47,11 @@ DELETE_SQL = (
     "DELETE FROM forex_rates WHERE rate_date = :rate_date AND currency_code = :currency_code"
 )
 INSERT_SQL = """
-INSERT INTO forex_rates(rate_date, currency_code, rate, base_currency, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell, source, created_at)
-VALUES(:rate_date, :currency_code, :rate, :base_currency, :tt_buy, :tt_sell, :bill_buy, :bill_sell, :travel_card_buy, :travel_card_sell, :source, :created_at)
+INSERT INTO forex_rates(rate_date, currency_code, rate, base_currency, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell, cn_buy, cn_sell, source, created_at)
+VALUES(:rate_date, :currency_code, :rate, :base_currency, :tt_buy, :tt_sell, :bill_buy, :bill_sell, :travel_card_buy, :travel_card_sell, :cn_buy, :cn_sell, :source, :created_at)
 """
 SELECT_SQL = (
-    "SELECT rate_date, currency_code, rate, source, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell "
+    "SELECT rate_date, currency_code, rate, source, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell, cn_buy, cn_sell "
     "FROM forex_rates ORDER BY rate_date"
 )
 
@@ -99,6 +101,8 @@ class RelationalBackend(BackendStrategy):
                     "bill_sell": row.bill_sell,
                     "travel_card_buy": row.travel_card_buy,
                     "travel_card_sell": row.travel_card_sell,
+                    "cn_buy": row.cn_buy,
+                    "cn_sell": row.cn_sell,
                     "source": row.source,
                     "created_at": datetime.utcnow(),
                 }
@@ -128,7 +132,7 @@ class RelationalBackend(BackendStrategy):
         query = SELECT_SQL
         if where_clauses:
             query = (
-                "SELECT rate_date, currency_code, rate, source, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell FROM forex_rates WHERE "
+                "SELECT rate_date, currency_code, rate, source, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell, cn_buy, cn_sell FROM forex_rates WHERE "
                 + " AND ".join(where_clauses)
                 + " ORDER BY rate_date"
             )
@@ -149,6 +153,8 @@ class RelationalBackend(BackendStrategy):
                     bill_sell=row[7],
                     travel_card_buy=row[8],
                     travel_card_sell=row[9],
+                    cn_buy=row[10],
+                    cn_sell=row[11],
                 )
                 for row in rows
             ]

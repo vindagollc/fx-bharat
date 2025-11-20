@@ -65,6 +65,8 @@ class MongoBackend(BackendStrategy):
                 "bill_sell": row.bill_sell,
                 "travel_card_buy": row.travel_card_buy,
                 "travel_card_sell": row.travel_card_sell,
+                "cn_buy": row.cn_buy,
+                "cn_sell": row.cn_sell,
             }
             for key, value in optional_fields.items():
                 if value is not None:
@@ -116,6 +118,8 @@ class MongoBackend(BackendStrategy):
                 bill_sell=doc.get("bill_sell"),
                 travel_card_buy=doc.get("travel_card_buy"),
                 travel_card_sell=doc.get("travel_card_sell"),
+                cn_buy=doc.get("cn_buy"),
+                cn_sell=doc.get("cn_sell"),
             )
             for doc in docs
         ]

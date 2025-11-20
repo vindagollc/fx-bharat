@@ -38,6 +38,8 @@ else:  # pragma: no cover - module import time
         bill_sell = Column(Float, nullable=True)
         travel_card_buy = Column(Float, nullable=True)
         travel_card_sell = Column(Float, nullable=True)
+        cn_buy = Column(Float, nullable=True)
+        cn_sell = Column(Float, nullable=True)
         created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
 
 
@@ -63,14 +65,16 @@ CREATE TABLE IF NOT EXISTS forex_rates (
     bill_sell REAL,
     travel_card_buy REAL,
     travel_card_sell REAL,
+    cn_buy REAL,
+    cn_sell REAL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(rate_date, currency)
 );
 """
 
 INSERT_IGNORE_STATEMENT = """
-INSERT OR IGNORE INTO forex_rates(rate_date, currency, rate, source, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR IGNORE INTO forex_rates(rate_date, currency, rate, source, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell, cn_buy, cn_sell)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 """
 
 UPDATE_STATEMENT = """
@@ -82,7 +86,9 @@ SET rate = ?,
     bill_buy = ?,
     bill_sell = ?,
     travel_card_buy = ?,
-    travel_card_sell = ?
+    travel_card_sell = ?,
+    cn_buy = ?,
+    cn_sell = ?
 WHERE rate_date = ? AND currency = ?;
 """
 
@@ -152,6 +158,8 @@ class _SQLAlchemyBackend:
                             bill_sell=row.bill_sell,
                             travel_card_buy=row.travel_card_buy,
                             travel_card_sell=row.travel_card_sell,
+                            cn_buy=row.cn_buy,
+                            cn_sell=row.cn_sell,
                         )
                     )
                     result.inserted += 1
@@ -164,6 +172,8 @@ class _SQLAlchemyBackend:
                     setattr(existing, "bill_sell", row.bill_sell)
                     setattr(existing, "travel_card_buy", row.travel_card_buy)
                     setattr(existing, "travel_card_sell", row.travel_card_sell)
+                    setattr(existing, "cn_buy", row.cn_buy)
+                    setattr(existing, "cn_sell", row.cn_sell)
                     result.updated += 1
             session.commit()
         return result
@@ -202,6 +212,8 @@ class _SQLAlchemyBackend:
                         bill_sell=cast(float | None, model.bill_sell),
                         travel_card_buy=cast(float | None, model.travel_card_buy),
                         travel_card_sell=cast(float | None, model.travel_card_sell),
+                        cn_buy=cast(float | None, model.cn_buy),
+                        cn_sell=cast(float | None, model.cn_sell),
                     )
                 )
             return records
@@ -238,6 +250,8 @@ class _SQLiteFallbackBackend:
                         row.bill_sell,
                         row.travel_card_buy,
                         row.travel_card_sell,
+                        row.cn_buy,
+                        row.cn_sell,
                     ),
                 ).rowcount
                 if inserted:
@@ -254,6 +268,8 @@ class _SQLiteFallbackBackend:
                         row.bill_sell,
                         row.travel_card_buy,
                         row.travel_card_sell,
+                        row.cn_buy,
+                        row.cn_sell,
                         row.rate_date.isoformat(),
                         row.currency,
                     ),
@@ -286,7 +302,7 @@ class _SQLiteFallbackBackend:
         if clauses:
             where = " WHERE " + " AND ".join(clauses)
         query = (
-            "SELECT rate_date, currency, rate, source, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell FROM forex_rates"
+            "SELECT rate_date, currency, rate, source, tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell, cn_buy, cn_sell FROM forex_rates"
             f"{where} ORDER BY rate_date"
         )
         cursor = self._connection.execute(query, params)
@@ -302,6 +318,8 @@ class _SQLiteFallbackBackend:
                 bill_sell=row["bill_sell"],
                 travel_card_buy=row["travel_card_buy"],
                 travel_card_sell=row["travel_card_sell"],
+                cn_buy=row["cn_buy"],
+                cn_sell=row["cn_sell"],
             )
             for row in cursor.fetchall()
         ]

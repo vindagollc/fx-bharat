@@ -9,6 +9,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable
 from urllib.request import urlretrieve
+import zlib
 
 from fx_bharat.ingestion.models import ForexRateRecord
 from fx_bharat.utils.logger import get_logger
@@ -74,6 +75,28 @@ class SBIPDFParser:
             except Exception as exc:  # pragma: no cover - defensive fallback
                 LOGGER.warning("Falling back to raw text parsing for %s (%s)", path, exc)
 
+        # Manual PDF stream extraction to cope when ``pypdf`` is unavailable
+        raw_bytes = path.read_bytes()
+        texts: list[str] = []
+        for match in re.finditer(b"stream\r?\n", raw_bytes):
+            start = match.end()
+            end = raw_bytes.find(b"endstream", start)
+            if end == -1:
+                continue
+            stream = raw_bytes[start:end].lstrip(b"\r\n").rstrip(b"\r\n")
+            try:
+                stream = zlib.decompress(stream)
+            except Exception:
+                pass
+            for text_match in re.finditer(rb"\(([^)]*)\)", stream):
+                try:
+                    texts.append(text_match.group(1).decode("latin-1"))
+                except Exception:
+                    continue
+
+        if texts:
+            return "".join(texts)
+
         try:
             return path.read_text(encoding="utf-8", errors="ignore")
         except Exception as exc:  # pragma: no cover - defensive fallback
@@ -100,6 +123,15 @@ class SBIPDFParser:
 
     def _extract_rates(self, text: str, rate_date: date) -> Iterable[ForexRateRecord]:
         cleaned_text = re.sub(r"[,\t]+", " ", text.upper())
+        cleaned_text = re.sub(r"(\d\.\d{2})(?=\d)", r"\1 ", cleaned_text)
+        cleaned_text = re.sub(r"(\d)\s*\.\s*(\d)", r"\1.\2", cleaned_text)
+        tokens = sorted(
+            set(self._CURRENCY_ALIAS_MAP.keys()) | set(self._CURRENCY_ALIAS_MAP.values()),
+            key=len,
+            reverse=True,
+        )
+        token_pattern = r"(" + "|".join(re.escape(token) for token in tokens) + r")"
+        cleaned_text = re.sub(token_pattern, r"\n\1", cleaned_text)
         cleaned_text = re.sub(r" +", " ", cleaned_text)
         lines = [line.strip() for line in cleaned_text.splitlines() if line.strip()]
 
@@ -109,9 +141,18 @@ class SBIPDFParser:
                 if alias not in line:
                     continue
                 numbers = [float(value) for value in re.findall(r"[0-9]+(?:\.[0-9]+)?", line)]
-                if len(numbers) < 6:
+                if len(numbers) < 8:
                     continue
-                tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell = numbers[:6]
+                (
+                    tt_buy,
+                    tt_sell,
+                    bill_buy,
+                    bill_sell,
+                    travel_card_buy,
+                    travel_card_sell,
+                    cn_buy,
+                    cn_sell,
+                ) = numbers[:8]
                 yield ForexRateRecord(
                     rate_date=rate_date,
                     currency=code,
@@ -123,6 +164,8 @@ class SBIPDFParser:
                     bill_sell=bill_sell,
                     travel_card_buy=travel_card_buy,
                     travel_card_sell=travel_card_sell,
+                    cn_buy=cn_buy,
+                    cn_sell=cn_sell,
                 )
                 matched = True
             if matched:
@@ -132,9 +175,18 @@ class SBIPDFParser:
                 continue
             code = code_match.group(1)
             numbers = [float(value) for value in re.findall(r"[0-9]+(?:\.[0-9]+)?", line)]
-            if len(numbers) < 6:
+            if len(numbers) < 8:
                 continue
-            tt_buy, tt_sell, bill_buy, bill_sell, travel_card_buy, travel_card_sell = numbers[:6]
+            (
+                tt_buy,
+                tt_sell,
+                bill_buy,
+                bill_sell,
+                travel_card_buy,
+                travel_card_sell,
+                cn_buy,
+                cn_sell,
+            ) = numbers[:8]
             yield ForexRateRecord(
                 rate_date=rate_date,
                 currency=code,
@@ -146,6 +198,8 @@ class SBIPDFParser:
                 bill_sell=bill_sell,
                 travel_card_buy=travel_card_buy,
                 travel_card_sell=travel_card_sell,
+                cn_buy=cn_buy,
+                cn_sell=cn_sell,
             )
 
 

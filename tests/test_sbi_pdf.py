@@ -14,9 +14,9 @@ def test_sbi_parser_extracts_rates(tmp_path: Path) -> None:
         """
         Forex Card Rates
         Date: 02/01/2024
-        USD 83.11 84.11 83.01 84.21 82.91 84.31
-        EURO 90.22 91.22 90.12 91.32 90.02 91.42
-        STERLING 101.33 102.33 101.23 102.43 101.13 102.53
+        USD 83.11 84.11 83.01 84.21 82.91 84.31 82.71 84.51
+        EURO 90.22 91.22 90.12 91.32 90.02 91.42 89.92 91.52
+        STERLING 101.33 102.33 101.23 102.43 101.13 102.53 101.03 102.63
         """
     )
     parser = SBIPDFParser()
@@ -34,7 +34,9 @@ def test_sbi_parser_extracts_rates(tmp_path: Path) -> None:
         usd.bill_sell,
         usd.travel_card_buy,
         usd.travel_card_sell,
-    ) == (83.11, 84.11, 83.01, 84.21, 82.91, 84.31)
+        usd.cn_buy,
+        usd.cn_sell,
+    ) == (83.11, 84.11, 83.01, 84.21, 82.91, 84.31, 82.71, 84.51)
     assert {row.source for row in parsed.rates} == {"SBI"}
 
 
@@ -45,8 +47,8 @@ def test_seed_sbi_forex_populates_sqlite(tmp_path: Path) -> None:
     pdf_path.write_text(
         """
         05/01/2024
-        USD 83.5 84.5 83.4 84.6 83.3 84.7
-        AUD 55.0 56.0 54.9 56.1 54.8 56.2
+        USD 83.5 84.5 83.4 84.6 83.3 84.7 83.2 84.8
+        AUD 55.0 56.0 54.9 56.1 54.8 56.2 54.7 56.3
         """
     )
     db_path = tmp_path / "forex.db"
@@ -64,9 +66,60 @@ def test_seed_sbi_forex_populates_sqlite(tmp_path: Path) -> None:
     with SQLiteManager(db_path) as manager:
         rows = manager.fetch_range(source="SBI")
     assert {
-        (row.rate_date, row.currency, row.tt_buy, row.tt_sell, row.bill_buy, row.bill_sell)
+        (
+            row.rate_date,
+            row.currency,
+            row.tt_buy,
+            row.tt_sell,
+            row.bill_buy,
+            row.bill_sell,
+            row.travel_card_buy,
+            row.travel_card_sell,
+            row.cn_buy,
+            row.cn_sell,
+        )
         for row in rows
     } == {
-        (date(2024, 1, 5), "USD", 83.5, 84.5, 83.4, 84.6),
-        (date(2024, 1, 5), "AUD", 55.0, 56.0, 54.9, 56.1),
+        (
+            date(2024, 1, 5),
+            "USD",
+            83.5,
+            84.5,
+            83.4,
+            84.6,
+            83.3,
+            84.7,
+            83.2,
+            84.8,
+        ),
+        (
+            date(2024, 1, 5),
+            "AUD",
+            55.0,
+            56.0,
+            54.9,
+            56.1,
+            54.8,
+            56.2,
+            54.7,
+            56.3,
+        ),
     }
+
+
+def test_parser_reads_decimal_spacing_and_cn_from_pdf() -> None:
+    parser = SBIPDFParser()
+    pdf_path = Path("resources/2025/1/2025-01-01.pdf")
+
+    parsed = parser.parse(pdf_path)
+
+    usd = next(row for row in parsed.rates if row.currency == "USD")
+    assert parsed.rate_date == date(2025, 1, 1)
+    assert usd.tt_buy == 85.22
+    assert usd.tt_sell == 86.07
+    assert usd.bill_buy == 85.15
+    assert usd.bill_sell == 86.24
+    assert usd.travel_card_buy == 85.15
+    assert usd.travel_card_sell == 86.24
+    assert usd.cn_buy == 84.15
+    assert usd.cn_sell == 86.55
