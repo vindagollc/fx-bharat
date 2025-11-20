@@ -31,7 +31,7 @@ except ModuleNotFoundError:  # pragma: no cover - dependency missing at runtime
 try:  # pragma: no cover - imported lazily
     from pymongo import MongoClient
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
-    MongoClient = None  # type: ignore[misc]
+    MongoClient = None  # type: ignore[misc, assignment]
 
 __all__ = [
     "__version__",

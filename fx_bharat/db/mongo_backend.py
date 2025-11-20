@@ -15,10 +15,10 @@ try:  # pragma: no cover - optional dependency
     from pymongo.collection import Collection
     from pymongo.errors import PyMongoError
 except ModuleNotFoundError:  # pragma: no cover - handled dynamically
-    MongoClient = None  # type: ignore[misc]
-    UpdateOne = None  # type: ignore[misc]
-    Collection = None  # type: ignore[misc]
-    PyMongoError = Exception  # type: ignore[misc]
+    MongoClient = None  # type: ignore[misc, assignment]
+    UpdateOne = None  # type: ignore[misc, assignment]
+    Collection = None  # type: ignore[misc, assignment]
+    PyMongoError = Exception  # type: ignore[misc, assignment]
 
 LOGGER = get_logger(__name__)
 
