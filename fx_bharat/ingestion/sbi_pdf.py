@@ -8,8 +8,31 @@ import zlib
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable, cast
 from urllib.request import urlretrieve
+
+if TYPE_CHECKING:  # pragma: no cover - type checking only
+    from tenacity import RetryError, retry, stop_after_attempt, wait_exponential
+else:  # pragma: no cover - optional dependency
+    try:
+        from tenacity import RetryError, retry, stop_after_attempt, wait_exponential
+    except ModuleNotFoundError:
+
+        class RetryError(Exception):
+            pass
+
+        def retry(*args, **kwargs):  # type: ignore[no-redef]
+            def decorator(func):
+                return func
+
+            return decorator
+
+        def stop_after_attempt(*_: int, **__):  # type: ignore[no-redef]
+            return None
+
+        def wait_exponential(*_: int, **__):  # type: ignore[no-redef]
+            return None
+
 
 from fx_bharat.ingestion.models import ForexRateRecord
 from fx_bharat.utils.logger import get_logger
@@ -247,6 +270,17 @@ class SBIPDFDownloader:
         )
         destination_path.parent.mkdir(parents=True, exist_ok=True)
         LOGGER.info("Downloading SBI forex PDF to %s", destination_path)
+        try:
+            return cast(Path, self._download_with_retry(destination_path))
+        except RetryError as exc:  # pragma: no cover - network variability
+            LOGGER.error("Exhausted retries while downloading SBI PDF: %s", exc)
+            last_exception = exc.last_attempt.exception()
+            if last_exception is not None:
+                raise last_exception
+            raise RuntimeError("RetryError raised without underlying exception")
+
+    @retry(wait=wait_exponential(multiplier=1, min=2, max=30), stop=stop_after_attempt(3))
+    def _download_with_retry(self, destination_path: Path) -> Path:
         urlretrieve(SBI_FOREX_PDF_URL, destination_path)
         return destination_path
 

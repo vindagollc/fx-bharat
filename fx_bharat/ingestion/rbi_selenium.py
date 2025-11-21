@@ -6,7 +6,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import TYPE_CHECKING, Optional, Sequence, cast
 
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
@@ -15,10 +15,37 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support.ui import WebDriverWait
 
+if TYPE_CHECKING:  # pragma: no cover - type checking only
+    from tenacity import RetryError, retry, stop_after_attempt, wait_exponential
+else:  # pragma: no cover - optional dependency
+    try:
+        from tenacity import RetryError, retry, stop_after_attempt, wait_exponential
+    except ModuleNotFoundError:
+
+        class RetryError(Exception):
+            pass
+
+        def retry(*args, **kwargs):  # type: ignore[no-redef]
+            def decorator(func):
+                return func
+
+            return decorator
+
+        def stop_after_attempt(*_: int, **__):  # type: ignore[no-redef]
+            return None
+
+        def wait_exponential(*_: int, **__):  # type: ignore[no-redef]
+            return None
+
+
 from fx_bharat.utils.logger import get_logger
 
 LOGGER = get_logger(__name__)
 RBI_ARCHIVE_URL = "https://www.rbi.org.in/Scripts/ReferenceRateArchive.aspx"
+
+
+class RBINoReferenceRateError(RuntimeError):
+    """Raised when RBI has not yet published reference rates for the requested range."""
 
 
 @dataclass
@@ -120,20 +147,14 @@ class RBISeleniumClient:
         if start_date > end_date:
             raise ValueError("start date must not exceed end date")
 
-        self.driver.get(RBI_ARCHIVE_URL)
-        wait = WebDriverWait(self.driver, self.timeout)
-        self._wait_for_page_ready(wait)
-        self._fill_date_field(wait, start_date, self.locators.from_date_locators)
-        self._fill_date_field(wait, end_date, self.locators.to_date_locators)
-        go_button = self._wait_for_clickable(wait, self.locators.go_button_locators)
-        self._click_via_js(go_button)
         try:
-            download_link = self._wait_for_clickable(wait, self.locators.download_link_locators)
-        except TimeoutException as exc:  # pragma: no cover - requires selenium
-            LOGGER.error("Download link did not appear for %s - %s", start_date, end_date)
-            raise exc
-        self._click_via_js(download_link)
-        downloaded_file = self._wait_for_download()
+            downloaded_file = cast(Path, self._download_with_retries(start_date, end_date))
+        except RetryError as exc:  # pragma: no cover - selenium heavy
+            LOGGER.error("Exhausted retries while downloading RBI data: %s", exc)
+            last_exception = exc.last_attempt.exception()
+            if last_exception is not None:
+                raise last_exception
+            raise RuntimeError("RetryError raised without underlying exception")
         safe_start = start_date.isoformat()
         safe_end = end_date.isoformat()
         final_name = (
@@ -143,6 +164,29 @@ class RBISeleniumClient:
         if downloaded_file != final_path:
             downloaded_file.rename(final_path)
         return final_path
+
+    # ``IngestionStrategy`` compatibility shim
+    def fetch(self, start_date: date, end_date: date, *, destination: Path | None = None) -> Path:
+        path = self.fetch_excel(start_date, end_date)
+        if destination is not None:
+            destination_path = Path(destination)
+            destination_path.parent.mkdir(parents=True, exist_ok=True)
+            return path.rename(destination_path)
+        return path
+
+    @retry(wait=wait_exponential(multiplier=1, min=2, max=30), stop=stop_after_attempt(3))
+    def _download_with_retries(self, start_date: date, end_date: date) -> Path:
+        self.driver.get(RBI_ARCHIVE_URL)
+        wait = WebDriverWait(self.driver, self.timeout)
+        self._wait_for_page_ready(wait)
+        self._fill_date_field(wait, start_date, self.locators.from_date_locators)
+        self._fill_date_field(wait, end_date, self.locators.to_date_locators)
+        go_button = self._wait_for_clickable(wait, self.locators.go_button_locators)
+        self._click_via_js(go_button)
+        self._raise_if_no_reference_rate()
+        download_link = self._wait_for_clickable(wait, self.locators.download_link_locators)
+        self._click_via_js(download_link)
+        return self._wait_for_download()
 
     def _fill_date_field(
         self,
@@ -256,6 +300,30 @@ class RBISeleniumClient:
         if isinstance(result, WebElement):
             return result
         raise NoSuchElementException("Unable to locate a clickable element")
+
+    def _raise_if_no_reference_rate(self) -> None:
+        """Detect RBI's "No Reference Rate Found." banner and stop early."""
+
+        short_wait = WebDriverWait(self.driver, min(self.timeout, 10))
+
+        def _locate(driver: webdriver.Chrome) -> bool:
+            try:
+                element = driver.find_element(
+                    By.XPATH, "//*[contains(normalize-space(.), 'No Reference Rate Found.')]"
+                )
+            except NoSuchElementException:
+                return False
+            return element.is_displayed()
+
+        try:
+            found = short_wait.until(_locate)
+        except TimeoutException:
+            found = False
+
+        if found:
+            raise RBINoReferenceRateError(
+                "RBI has not published reference rates for the requested date range yet"
+            )
 
     def _click_via_js(self, element: WebElement) -> None:
         """Scroll the element into view and trigger a JavaScript click."""

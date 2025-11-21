@@ -55,6 +55,18 @@ class SQLiteManagerTests(unittest.TestCase):
         self.assertEqual(len(feb_rows), 1)
         self.assertEqual(feb_rows[0].rate_date, date(2024, 2, 1))
 
+    def test_ingestion_metadata_tracks_latest_date(self) -> None:
+        self.assertIsNone(self.manager.ingestion_checkpoint("RBI"))
+
+        self.manager.update_ingestion_checkpoint("RBI", date(2024, 1, 2))
+        self.assertEqual(self.manager.ingestion_checkpoint("RBI"), date(2024, 1, 2))
+
+        self.manager.update_ingestion_checkpoint("RBI", date(2024, 1, 1))
+        self.assertEqual(self.manager.ingestion_checkpoint("RBI"), date(2024, 1, 2))
+
+        self.manager.update_ingestion_checkpoint("RBI", date(2024, 2, 1))
+        self.assertEqual(self.manager.ingestion_checkpoint("RBI"), date(2024, 2, 1))
+
 
 class PersistenceResultTests(unittest.TestCase):
     def test_total_property_adds_inserted_and_updated(self) -> None:

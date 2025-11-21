@@ -1,6 +1,10 @@
 # Runtime dependencies for fx_bharat
 selenium>=4.14
+webdriver-manager>=4.0
+html5lib>=1.1
 pandas>=2.1
 beautifulsoup4>=4.12
 SQLAlchemy>=2.0
 pypdf>=4.2
+tenacity>=8.2
+

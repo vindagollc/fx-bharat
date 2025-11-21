@@ -6,7 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, Sequence, cast
+from typing import TYPE_CHECKING, Any, Protocol, Sequence, cast
 
 from fx_bharat.db import DEFAULT_SQLITE_DB_PATH
 from fx_bharat.ingestion.models import ForexRateRecord
@@ -17,6 +17,7 @@ LOGGER = get_logger(__name__)
 try:  # pragma: no cover - exercised indirectly
     from sqlalchemy import Column, Date, DateTime, Float, String, create_engine, select, text
     from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+    from sqlalchemy.sql import func
 except ModuleNotFoundError:  # pragma: no cover - fallback path
     SQLALCHEMY_AVAILABLE = False
 else:  # pragma: no cover - module import time
@@ -48,6 +49,13 @@ else:  # pragma: no cover - module import time
         cn_buy = Column(Float, nullable=True)
         cn_sell = Column(Float, nullable=True)
         created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+
+    class _IngestionMetadata(Base):
+        __tablename__ = "ingestion_metadata"
+
+        source = Column(String, primary_key=True)
+        last_ingested_date = Column(Date, nullable=False)
+        updated_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
 
 
 if TYPE_CHECKING:  # pragma: no cover - type checker helper
@@ -83,6 +91,12 @@ CREATE TABLE IF NOT EXISTS forex_rates_sbi (
     cn_sell REAL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(rate_date, currency)
+);
+
+CREATE TABLE IF NOT EXISTS ingestion_metadata (
+    source TEXT PRIMARY KEY,
+    last_ingested_date DATE NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -156,6 +170,15 @@ class _BackendProtocol(Protocol):
         ...  # pragma: no cover - protocol definition
 
     def close(self) -> None:
+        ...  # pragma: no cover - protocol definition
+
+    def latest_rate_date(self, source: str) -> date | None:
+        ...  # pragma: no cover - protocol definition
+
+    def ingestion_checkpoint(self, source: str) -> date | None:
+        ...  # pragma: no cover - protocol definition
+
+    def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
         ...  # pragma: no cover - protocol definition
 
 
@@ -266,23 +289,49 @@ class _SQLAlchemyBackend:
                             cn_sell=cast(float | None, sbi_model.cn_sell),
                         )
                     )
-            if source is None or source.upper() == "RBI":
-                rbi_stmt = select(_RbiRate).order_by(_RbiRate.rate_date)
-                if start is not None:
-                    rbi_stmt = rbi_stmt.where(_RbiRate.rate_date >= start)
-                if end is not None:
-                    rbi_stmt = rbi_stmt.where(_RbiRate.rate_date <= end)
-                for rbi_row in session.execute(rbi_stmt).scalars():
-                    rbi_model = cast(_RbiRate, rbi_row)
-                    records.append(
-                        ForexRateRecord(
-                            rate_date=cast(date, rbi_model.rate_date),
-                            currency=cast(str, rbi_model.currency),
-                            rate=cast(float, rbi_model.rate),
-                            source="RBI",
-                        )
+        if source is None or source.upper() == "RBI":
+            rbi_stmt = select(_RbiRate).order_by(_RbiRate.rate_date)
+            if start is not None:
+                rbi_stmt = rbi_stmt.where(_RbiRate.rate_date >= start)
+            if end is not None:
+                rbi_stmt = rbi_stmt.where(_RbiRate.rate_date <= end)
+            for rbi_row in session.execute(rbi_stmt).scalars():
+                rbi_model = cast(_RbiRate, rbi_row)
+                records.append(
+                    ForexRateRecord(
+                        rate_date=cast(date, rbi_model.rate_date),
+                        currency=cast(str, rbi_model.currency),
+                        rate=cast(float, rbi_model.rate),
+                        source="RBI",
                     )
+                )
         return records
+
+    def latest_rate_date(self, source: str) -> date | None:
+        stmt = select(
+            func.max(_SbiRate.rate_date)
+            if source.upper() == "SBI"
+            else func.max(_RbiRate.rate_date)
+        )
+        with self._SessionFactory() as session:
+            result = session.execute(stmt).scalar_one_or_none()
+        return cast(date | None, result)
+
+    def ingestion_checkpoint(self, source: str) -> date | None:
+        with self._SessionFactory() as session:
+            record = session.get(_IngestionMetadata, source.upper())
+            return cast(date | None, record.last_ingested_date) if record else None
+
+    def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
+        with self._SessionFactory() as session:
+            existing = session.get(_IngestionMetadata, source.upper())
+            if existing is None:
+                session.add(_IngestionMetadata(source=source.upper(), last_ingested_date=rate_date))
+            elif existing.last_ingested_date < rate_date:
+                cast(Any, existing).last_ingested_date = rate_date
+            else:
+                return
+            session.commit()
 
     def close(self) -> None:  # pragma: no cover - trivial
         self.engine.dispose()
@@ -426,6 +475,34 @@ class _SQLiteFallbackBackend:
 
         return records
 
+    def latest_rate_date(self, source: str) -> date | None:
+        table = "forex_rates_sbi" if source.upper() == "SBI" else "forex_rates_rbi"
+        cursor = self._connection.execute(f"SELECT MAX(rate_date) AS latest FROM {table}")
+        value = cursor.fetchone()["latest"]
+        return date.fromisoformat(value) if value else None
+
+    def ingestion_checkpoint(self, source: str) -> date | None:
+        cursor = self._connection.execute(
+            "SELECT last_ingested_date FROM ingestion_metadata WHERE source = ?",
+            (source.upper(),),
+        )
+        value = cursor.fetchone()
+        if value is None:
+            return None
+        return date.fromisoformat(value["last_ingested_date"])
+
+    def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO ingestion_metadata(source, last_ingested_date)
+                VALUES(?, ?)
+                ON CONFLICT(source) DO UPDATE SET last_ingested_date = excluded.last_ingested_date
+                WHERE excluded.last_ingested_date > ingestion_metadata.last_ingested_date
+                """,
+                (source.upper(), rate_date.isoformat()),
+            )
+
     def close(self) -> None:  # pragma: no cover - trivial
         self._connection.close()
 
@@ -467,6 +544,15 @@ class SQLiteManager:
 
     def close(self) -> None:  # pragma: no cover - trivial
         self._backend.close()
+
+    def latest_rate_date(self, source: str) -> date | None:
+        return self._backend.latest_rate_date(source)
+
+    def ingestion_checkpoint(self, source: str) -> date | None:
+        return self._backend.ingestion_checkpoint(source)
+
+    def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
+        self._backend.update_ingestion_checkpoint(source, rate_date)
 
     def __enter__(self) -> "SQLiteManager":  # pragma: no cover - trivial
         return self
