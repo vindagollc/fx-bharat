@@ -10,10 +10,12 @@
 - Mermaid ER diagram and schema.sql
 - Ingestion metadata checkpoints for cron-friendly seeding
 - Migration guide for 0.1.0 → 0.2.x
+- Bundled RBI and SBI reference data refreshed through **21/11/2025**
 ### Fixed
 - README inconsistencies
 - Deprecated `.rates()` references
 - Broken links & method typos
+- RBI seeding now stops early when the archive reports "No Reference Rate Found."
 ### Changed
 - Improved ingestion resilience
 - Incremental seeding with unified `seed(from_date, to_date, source)` API (replaces `seed_historical`)

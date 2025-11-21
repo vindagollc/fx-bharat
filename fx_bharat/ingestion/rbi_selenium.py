@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Sequence, cast
 
 from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webelement import WebElement
@@ -42,6 +42,10 @@ from fx_bharat.utils.logger import get_logger
 
 LOGGER = get_logger(__name__)
 RBI_ARCHIVE_URL = "https://www.rbi.org.in/Scripts/ReferenceRateArchive.aspx"
+
+
+class RBINoReferenceRateError(RuntimeError):
+    """Raised when RBI has not yet published reference rates for the requested range."""
 
 
 @dataclass
@@ -179,6 +183,7 @@ class RBISeleniumClient:
         self._fill_date_field(wait, end_date, self.locators.to_date_locators)
         go_button = self._wait_for_clickable(wait, self.locators.go_button_locators)
         self._click_via_js(go_button)
+        self._raise_if_no_reference_rate()
         download_link = self._wait_for_clickable(wait, self.locators.download_link_locators)
         self._click_via_js(download_link)
         return self._wait_for_download()
@@ -295,6 +300,30 @@ class RBISeleniumClient:
         if isinstance(result, WebElement):
             return result
         raise NoSuchElementException("Unable to locate a clickable element")
+
+    def _raise_if_no_reference_rate(self) -> None:
+        """Detect RBI's "No Reference Rate Found." banner and stop early."""
+
+        short_wait = WebDriverWait(self.driver, min(self.timeout, 10))
+
+        def _locate(driver: webdriver.Chrome) -> bool:
+            try:
+                element = driver.find_element(
+                    By.XPATH, "//*[contains(normalize-space(.), 'No Reference Rate Found.')]"
+                )
+            except NoSuchElementException:
+                return False
+            return element.is_displayed()
+
+        try:
+            found = short_wait.until(_locate)
+        except TimeoutException:
+            found = False
+
+        if found:
+            raise RBINoReferenceRateError(
+                "RBI has not published reference rates for the requested date range yet"
+            )
 
     def _click_via_js(self, element: WebElement) -> None:
         """Scroll the element into view and trigger a JavaScript click."""

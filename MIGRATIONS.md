@@ -12,3 +12,4 @@
 3. Replace any `seed_historical` usage with the unified `seed(from_date=..., to_date=..., source=...)` helper.
 4. Schedule `fx.seed()` as a cron job to continue ingestion from the recorded checkpoint through the current day.
 5. Re-run your test suite; coverage has moved to pytest-cov and Codecov workflows in CI.
+6. The bundled RBI/SBI snapshots ship data through **21/11/2025**.
