@@ -9,7 +9,7 @@ from pathlib import Path
 from fx_bharat.db import DEFAULT_SQLITE_DB_PATH
 from fx_bharat.db.sqlite_manager import PersistenceResult, SQLiteManager
 from fx_bharat.ingestion.rbi_csv import RBICSVParser
-from fx_bharat.ingestion.rbi_selenium import RBISeleniumClient
+from fx_bharat.ingestion.rbi_selenium import RBINoReferenceRateError, RBISeleniumClient
 from fx_bharat.ingestion.rbi_workbook import RBIWorkbookConverter
 from fx_bharat.utils.date_range import month_ranges, parse_date
 from fx_bharat.utils.logger import get_logger
@@ -86,7 +86,16 @@ def seed_rbi_forex(
         with RBISeleniumClient(download_dir=download_path, headless=headless) as client:
             for chunk in date_chunks:
                 LOGGER.info("Processing %s - %s", chunk.start, chunk.end)
-                excel_path = client.fetch_excel(chunk.start, chunk.end)
+                try:
+                    excel_path = client.fetch_excel(chunk.start, chunk.end)
+                except RBINoReferenceRateError as exc:
+                    LOGGER.warning(
+                        "RBI reference rates for %s → %s are not yet published; stopping ingestion early (%s)",
+                        chunk.start,
+                        chunk.end,
+                        exc,
+                    )
+                    break
                 csv_path = converter.to_csv(
                     excel_path,
                     start_date=chunk.start,

@@ -20,8 +20,8 @@
 
 Every published wheel bundles historical forex data from:
 
-> RBI archive ingested from **12/04/2022 → 20/11/2025**
-> SBI Forex PDFs ingested from **01/01/2020 → 20/11/2025**
+> RBI archive ingested from **12/04/2022 → 21/11/2025**
+> SBI Forex PDFs ingested from **01/01/2020 → 21/11/2025**
 
 so the package is **immediately useful** with no setup required.
 
@@ -76,8 +76,15 @@ FxBharat retrieves daily *reference exchange rates* from:
 
 Coverage today:
 
-* RBI archive ingested from **12/04/2022 → 20/11/2025**
-* SBI Forex PDFs ingested from **01/01/2020 → 20/11/2025**
+* RBI archive ingested from **12/04/2022 → 21/11/2025**
+* SBI Forex PDFs ingested from **01/01/2020 → 21/11/2025**
+
+Publication cadence (IST):
+
+* RBI updates the reference rates on the archive page around **5:00 PM**.
+* SBI refreshes the Forex Card PDF around **10:00 AM**.
+
+If you seed RBI data before the daily publish window, the package exits early when the site returns **"No Reference Rate Found."**—re-run after the data is available.
 
 Please respect the RBI/SBI website terms of service when running ingestion. The default retry and incremental settings are tuned to minimise load on the upstream providers.
 
