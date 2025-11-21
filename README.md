@@ -20,8 +20,8 @@
 
 Every published wheel bundles historical forex data from:
 
-> RBI archive ingested from **12/04/2022 → 20/11/2025**
-> SBI Forex PDFs ingested from **01/01/2020 → 20/11/2025**
+> RBI archive ingested from **12/04/2022 → 21/11/2025**
+> SBI Forex PDFs ingested from **01/01/2020 → 21/11/2025**
 
 so the package is **immediately useful** with no setup required.
 
@@ -33,6 +33,7 @@ so the package is **immediately useful** with no setup required.
 * [Data Source](#data-source)
 * [Installation](#installation)
 * [Package Layout](#package-layout)
+* [Database Schema](#database-schema)
 * [Usage](#usage)
   * [1. Quick Start (Bundled SQLite)](#1-quick-start-using-bundled-sqlite-database)
     * [Sqlite Example](#example-default-sqlite)
@@ -42,6 +43,7 @@ so the package is **immediately useful** with no setup required.
     * [PostgreSQL Example](#example-postgresql)
     * [MySQL/MariaDB Example](#example-mysqlmariadb)
     * [MongoDB Example](#example-mongodb)
+  * [Ingestion Controls](#ingestion-controls)
 * [Backend Requirements](#backend-requirements)
 * [Running Tests](#running-tests)
 * [Design Philosophy](#design-philosophy)
@@ -75,7 +77,16 @@ FxBharat retrieves daily *reference exchange rates* from:
 Coverage today:
 
 * RBI archive ingested from **12/04/2022 → 20/11/2025**
-* SBI Forex PDFs ingested from **01/01/2020 → 20/11/2025**
+* SBI Forex PDFs ingested from **01/01/2020 → 21/11/2025**
+
+Publication cadence (IST):
+
+* RBI updates the reference rates on the archive page around **5:00 PM**.
+* SBI refreshes the Forex Card PDF around **10:00 AM**.
+
+If you seed RBI data before the daily publish window, the package exits early when the site returns **"No Reference Rate Found."**—re-run after the data is available.
+
+Please respect the RBI/SBI website terms of service when running ingestion. The default retry and incremental settings are tuned to minimise load on the upstream providers.
 
 Workflow:
 
@@ -148,6 +159,38 @@ fx_bharat/
 
 ---
 
+# **Database Schema**
+
+FxBharat stores RBI and SBI snapshots in two normalized tables. A generated
+`resources/schema.sql` mirrors the schema for external databases.
+
+```mermaid
+erDiagram
+    forex_rates_rbi {
+        DATE rate_date PK
+        TEXT currency PK
+        REAL rate
+        TIMESTAMP created_at
+    }
+    forex_rates_sbi {
+        DATE rate_date PK
+        TEXT currency PK
+        REAL rate
+        REAL tt_buy
+        REAL tt_sell
+        REAL bill_buy
+        REAL bill_sell
+        REAL travel_card_buy
+        REAL travel_card_sell
+        REAL cn_buy
+        REAL cn_sell
+        TIMESTAMP created_at
+    }
+    forex_rates_sbi ||--|| forex_rates_rbi : "aligned by rate_date/currency"
+```
+
+---
+
 # **Usage**
 
 ## **1. Quick Start (Using Bundled SQLite Database)**
@@ -202,7 +245,7 @@ for snapshot in history:
 from datetime import date
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.3.0
+print(FxBharat.__version__)  # 0.2.1
 
 # Default Usage
 fx = FxBharat()
@@ -232,7 +275,17 @@ fx.seed()
 
 ## Source Selection (RBI vs SBI)
 
-FxBharat now stores RBI and SBI data in **separate tables/collections**. Query helpers always return SBI snapshots first (when present) followed by RBI snapshots. Use `seed_historical(..., source="RBI" | "SBI")` to ingest archival PDFs for a specific source; `seed()` pulls both sources for the current day and saves the SBI PDF into `resources/`.
+FxBharat now stores RBI and SBI data in **separate tables/collections**. Query helpers always return SBI snapshots first (when present) followed by RBI snapshots. Use the unified `seed(from_date=..., to_date=..., source=...)` helper to ingest targeted ranges; calling `seed()` with no arguments replays data for both sources from the last recorded checkpoint through today (including today) and stores the SBI PDF in `resources/`.
+
+---
+
+## Ingestion Controls
+
+* `source_filter` on `rate`, `history`, and `rates` lets you restrict output to `"rbi"` or `"sbi"` while keeping blended ordering.
+* Incremental seeding is enabled by default using the new `ingestion_metadata` table; the last ingested `rate_date` per source is detected and skipped automatically during cron-style runs.
+* Pass `dry_run=True` to `seed`, `seed_sbi_historical`, or `seed_rbi_forex` to validate connectivity without writing rows.
+* Yearly aggregations now select the most recent snapshot per calendar year for each source.
+* `seed` accepts optional `from_date`, `to_date`, and `source` parameters to restrict ingestion. When you omit them, FxBharat resumes from the last metadata checkpoint for both sources and ingests through today.
 
 ## **2. Connecting to Your Own Database**
 
@@ -273,7 +326,7 @@ from datetime import date
 
 fx = FxBharat(db_config='postgresql://postgres:postgres@localhost/forex')
 
-success, error = fx.conection()
+success, error = fx.connection()
 if not success:
     print(error)
     exit(1)
@@ -314,7 +367,7 @@ from datetime import date
 
 fx = FxBharat(db_config='mysql://user:pass@localhost:3306/forex')
 
-success, error = fx.conection()
+success, error = fx.connection()
 if not success:
     print(error)
     exit(1)
@@ -362,7 +415,7 @@ from datetime import date
 
 fx = FxBharat(db_config='mongodb://127.0.0.1:27017/forex')
 
-success, error = fx.conection()
+success, error = fx.connection()
 if not success:
     print(error)
     exit(1)
@@ -470,6 +523,12 @@ All ingestion and persistence layers are modular and override-able.
 ### 🔁 Idempotent ingestion
 
 `seed()` can be run safely multiple times without duplicate entries.
+
+---
+
+# Migration Notes
+
+See [MIGRATIONS.md](./MIGRATIONS.md) for upgrade guidance from 0.1.0 → 0.2.0 and 0.2.1, including the new ingestion metadata table and unified `seed` API.
 
 ---
 

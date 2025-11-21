@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import argparse
+from datetime import timedelta
 from pathlib import Path
 
 from fx_bharat.db import DEFAULT_SQLITE_DB_PATH
 from fx_bharat.db.sqlite_manager import PersistenceResult, SQLiteManager
 from fx_bharat.ingestion.rbi_csv import RBICSVParser
-from fx_bharat.ingestion.rbi_selenium import RBISeleniumClient
+from fx_bharat.ingestion.rbi_selenium import RBINoReferenceRateError, RBISeleniumClient
 from fx_bharat.ingestion.rbi_workbook import RBIWorkbookConverter
 from fx_bharat.utils.date_range import month_ranges, parse_date
 from fx_bharat.utils.logger import get_logger
@@ -57,22 +58,44 @@ def seed_rbi_forex(
     db_path: str | Path = DEFAULT_SQLITE_DB_PATH,
     headless: bool = True,
     download_dir: str | Path | None = None,
+    incremental: bool = True,
+    dry_run: bool = False,
 ) -> PersistenceResult:
     """Seed RBI forex data between ``start`` and ``end`` dates."""
 
     start_date = parse_date(start)
     end_date = parse_date(end)
     enforce_rbi_min_date(start_date, end_date)
+    if dry_run:
+        LOGGER.info("Dry-run enabled; skipping RBI ingestion for %s → %s", start, end)
+        return PersistenceResult()
     converter = RBIWorkbookConverter()
     csv_parser = RBICSVParser()
-    date_chunks = list(month_ranges(start_date, end_date))
     download_path = Path(download_dir) if download_dir else None
     total = PersistenceResult()
-    with RBISeleniumClient(download_dir=download_path, headless=headless) as client:
-        with SQLiteManager(db_path) as manager:
+    with SQLiteManager(db_path) as manager:
+        effective_start = start_date
+        if incremental:
+            checkpoint = manager.ingestion_checkpoint("RBI") or manager.latest_rate_date("RBI")
+            if checkpoint and checkpoint >= start_date:
+                effective_start = checkpoint + timedelta(days=1)
+        if effective_start > end_date:
+            LOGGER.info("RBI data already ingested up to %s; nothing to do", end_date)
+            return total
+        date_chunks = list(month_ranges(effective_start, end_date))
+        with RBISeleniumClient(download_dir=download_path, headless=headless) as client:
             for chunk in date_chunks:
                 LOGGER.info("Processing %s - %s", chunk.start, chunk.end)
-                excel_path = client.fetch_excel(chunk.start, chunk.end)
+                try:
+                    excel_path = client.fetch_excel(chunk.start, chunk.end)
+                except RBINoReferenceRateError as exc:
+                    LOGGER.warning(
+                        "RBI reference rates for %s → %s are not yet published; stopping ingestion early (%s)",
+                        chunk.start,
+                        chunk.end,
+                        exc,
+                    )
+                    break
                 csv_path = converter.to_csv(
                     excel_path,
                     start_date=chunk.start,
@@ -84,6 +107,9 @@ def seed_rbi_forex(
                 _log_chunk_result(f"Chunk {chunk.start} → {chunk.end}", result)
                 total.inserted += result.inserted
                 total.updated += result.updated
+                if result.inserted:
+                    latest_day = max(row.rate_date for row in csv_rows)
+                    manager.update_ingestion_checkpoint("RBI", latest_day)
     LOGGER.info(
         "Seeding finished: inserted %s rows, updated %s rows (total %s)",
         total.inserted,
