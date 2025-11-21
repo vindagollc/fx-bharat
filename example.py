@@ -20,7 +20,7 @@ fx = FxBharat()
 # -------------------------------------------------------------
 # Seed data
 # -------------------------------------------------------------
-# fx.seed()
+fx.seed()
 #
 # Use this to refresh or load new forex data from:
 #   - RBI (Reference Rate Archive, Excel files)
@@ -47,59 +47,30 @@ fx = FxBharat()
 # ]
 #
 # If both RBI and SBI have new data for today, you'll get 2 entries.
-rates = fx.rate()
-for rate in rates:
-    # `.get('rates')` returns a dictionary:
-    #   {"USD": 83.12, "EUR": 90.45, ...}
-    print(rate.get("rates"))
-
-
-# -------------------------------------------------------------
-# 2. Latest RBI-only forex rates
-# -------------------------------------------------------------
-# Only retrieves the latest RBI reference rate available in DB.
-rates = fx.rate(source_filter="rbi")
-for rate in rates:
-    print(rate.get("rates"))
-
-
-# -------------------------------------------------------------
-# 3. Latest SBI-only forex rates
-# -------------------------------------------------------------
-# SBI sometimes publishes only a subset of currencies.
-# Useful if your workflow depends on forex card or remittance rates.
-rates = fx.rate(source_filter="sbi")
-for rate in rates:
-    print(rate.get("rates"))
-
-
-# -------------------------------------------------------------
-# 4. Get historical forex rates for a specific date
-# -------------------------------------------------------------
-# You can fetch exact-day rates (for both RBI and SBI) like this:
-rates = fx.rate(rate_date=date(2024, 2, 10))
-for rate in rates:
-    print(rate.get("rates"))
-# If the date is a weekend/holiday:
-# - RBI may not publish anything → empty result
-# - SBI may still publish → non-empty result
-
-
-# -------------------------------------------------------------
-# 5. Get historical forex ranges (Daily/Weekly/Monthly/Yearly)
-# -------------------------------------------------------------
-# fx.history() returns a LIST of dicts, one per entry:
-#   [
-#     {"date": <date>, "source": "rbi", "rates": {...}},
-#     {"date": <date>, "source": "rbi", "rates": {...}},
-#     ...
-#   ]
+# rates = fx.rate()
+# for rate in rates:
+#     # `.get('rates')` returns a dictionary:
+#     #   {"USD": 83.12, "EUR": 90.45, ...}
+#     print(rate.get("rates"))
 #
-# frequency:
-#   - "daily"   → raw daily entries
-#   - "weekly"  → one entry per week (Monday-first or RBI-published)
-#   - "monthly" → month-end values
-#   - "yearly"  → year-end values
+#
+# # -------------------------------------------------------------
+# # 2. Latest RBI-only forex rates
+# # -------------------------------------------------------------
+# # Only retrieves the latest RBI reference rate available in DB.
+# rates = fx.rate(source_filter="rbi")
+# for rate in rates:
+#     print(rate.get("rates"))
+#
+#
+# # -------------------------------------------------------------
+# # 3. Latest SBI-only forex rates
+# # -------------------------------------------------------------
+# # SBI sometimes publishes only a subset of currencies.
+# # Useful if your workflow depends on forex card or remittance rates.
+# rates = fx.rate(source_filter="sbi")
+# for rate in rates:
+#     print(rate.get("rates"))
 #
 # TIP: "weekly" and "monthly" are perfect for charts and analytics.
 history = fx.history(

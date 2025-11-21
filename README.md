@@ -76,7 +76,7 @@ FxBharat retrieves daily *reference exchange rates* from:
 
 Coverage today:
 
-* RBI archive ingested from **12/04/2022 → 21/11/2025**
+* RBI archive ingested from **12/04/2022 → 20/11/2025**
 * SBI Forex PDFs ingested from **01/01/2020 → 21/11/2025**
 
 Publication cadence (IST):

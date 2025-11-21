@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.1] - 2025-11-20
+## [0.2.1] - 2025-11-21
 ### Added
 - Retry mechanism for ingestion
 - Seed dry_run support
@@ -10,7 +10,8 @@
 - Mermaid ER diagram and schema.sql
 - Ingestion metadata checkpoints for cron-friendly seeding
 - Migration guide for 0.1.0 → 0.2.x
-- Bundled RBI and SBI reference data refreshed through **21/11/2025**
+- Bundled RBI reference data refreshed through **20/11/2025**
+- Bundled SBI reference data refreshed through **21/11/2025**
 ### Fixed
 - README inconsistencies
 - Deprecated `.rates()` references
