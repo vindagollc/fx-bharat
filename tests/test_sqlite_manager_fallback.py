@@ -28,7 +28,9 @@ def test_sqlite_manager_uses_fallback_when_sqlalchemy_missing(
     manager.close()
 
 
-def test_sqlite_fallback_updates_and_filters(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_sqlite_fallback_updates_and_filters(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(sqlite_manager_module, "SQLALCHEMY_AVAILABLE", False)
 
     manager = sqlite_manager_module.SQLiteManager(tmp_path / "fallback_filters.db")

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import sys
 from datetime import date
 from pathlib import Path
-import sys
 
 from fx_bharat.seeds.populate_sbi_forex import _iter_pdf_paths, parse_args
 

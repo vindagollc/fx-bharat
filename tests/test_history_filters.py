@@ -27,15 +27,9 @@ def _seed_sample_data(app: FxBharat) -> None:
     assert app.sqlite_manager is not None
     app.sqlite_manager.insert_rates(
         [
-            ForexRateRecord(
-                rate_date=date(2024, 1, 1), currency="USD", rate=82.0, source="RBI"
-            ),
-            ForexRateRecord(
-                rate_date=date(2024, 1, 1), currency="USD", rate=81.5, source="SBI"
-            ),
-            ForexRateRecord(
-                rate_date=date(2024, 1, 2), currency="USD", rate=82.2, source="RBI"
-            ),
+            ForexRateRecord(rate_date=date(2024, 1, 1), currency="USD", rate=82.0, source="RBI"),
+            ForexRateRecord(rate_date=date(2024, 1, 1), currency="USD", rate=81.5, source="SBI"),
+            ForexRateRecord(rate_date=date(2024, 1, 2), currency="USD", rate=82.2, source="RBI"),
         ]
     )
 

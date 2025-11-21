@@ -370,7 +370,7 @@ class FxBharat:
                 )
             checkpoint = self._get_ingestion_checkpoint(sqlite_db_path, "SBI")
             mirror_start = from_date or (
-                checkpoint + timedelta(days=1) if checkpoint else start_date
+                checkpoint + timedelta(days=1) if checkpoint else (sbi_start_date or historical_end)
             )
             mirror_windows.append((mirror_start, resolved_to, "SBI"))
 

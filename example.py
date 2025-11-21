@@ -1,4 +1,5 @@
 from datetime import date
+
 from fx_bharat import FxBharat
 
 # Print installed package version
@@ -50,7 +51,7 @@ rates = fx.rate()
 for rate in rates:
     # `.get('rates')` returns a dictionary:
     #   {"USD": 83.12, "EUR": 90.45, ...}
-    print(rate.get('rates'))
+    print(rate.get("rates"))
 
 
 # -------------------------------------------------------------
@@ -59,7 +60,7 @@ for rate in rates:
 # Only retrieves the latest RBI reference rate available in DB.
 rates = fx.rate(source_filter="rbi")
 for rate in rates:
-    print(rate.get('rates'))
+    print(rate.get("rates"))
 
 
 # -------------------------------------------------------------
@@ -69,7 +70,7 @@ for rate in rates:
 # Useful if your workflow depends on forex card or remittance rates.
 rates = fx.rate(source_filter="sbi")
 for rate in rates:
-    print(rate.get('rates'))
+    print(rate.get("rates"))
 
 
 # -------------------------------------------------------------
@@ -78,7 +79,7 @@ for rate in rates:
 # You can fetch exact-day rates (for both RBI and SBI) like this:
 rates = fx.rate(rate_date=date(2024, 2, 10))
 for rate in rates:
-    print(rate.get('rates'))
+    print(rate.get("rates"))
 # If the date is a weekend/holiday:
 # - RBI may not publish anything → empty result
 # - SBI may still publish → non-empty result
@@ -105,7 +106,7 @@ history = fx.history(
     from_date=date(2025, 11, 1),
     to_date=date.today(),
     frequency="daily",  # or: weekly / monthly / yearly
-    source_filter="rbi" # Optional — defaults to all sources
+    source_filter="rbi",  # Optional — defaults to all sources
 )
 
 # Print first 2 entries as a preview

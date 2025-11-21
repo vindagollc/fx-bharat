@@ -460,7 +460,9 @@ def test_seed_rejects_inverted_date_range(sqlite_fx: FxBharat) -> None:
         sqlite_fx.seed(from_date=date(2023, 2, 1), to_date=date(2023, 1, 1))
 
 
-def test_seed_with_explicit_range_targets_rbi(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_seed_with_explicit_range_targets_rbi(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     db_path = tmp_path / "seed.db"
     fx = FxBharat(db_config=f"sqlite:///{db_path}")
 
@@ -486,7 +488,9 @@ def test_seed_with_explicit_range_targets_rbi(monkeypatch: pytest.MonkeyPatch, t
     assert "sbi_today" not in calls
 
 
-def test_seed_default_fetches_sbi_today_and_history(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_seed_default_fetches_sbi_today_and_history(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     db_path = tmp_path / "seed.db"
     fx = FxBharat(db_config=f"sqlite:///{db_path}")
 
@@ -518,7 +522,9 @@ def test_seed_mirrors_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch) 
 
     calls: dict[str, object] = {}
 
-    def _fake_seed_rbi(from_str: str, to_str: str, *, db_path: Path, incremental: bool, **_: object) -> None:
+    def _fake_seed_rbi(
+        from_str: str, to_str: str, *, db_path: Path, incremental: bool, **_: object
+    ) -> None:
         calls["range"] = (from_str, to_str, incremental)
         calls["db_path"] = Path(db_path)
 
