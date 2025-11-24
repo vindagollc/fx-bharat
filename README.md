@@ -73,6 +73,7 @@ FxBharat retrieves daily *reference exchange rates* from:
 
 * 👉 **RBI Reference Rate Archive** — [https://www.rbi.org.in/Scripts/ReferenceRateArchive.aspx](https://www.rbi.org.in/Scripts/ReferenceRateArchive.aspx)
 * 👉 **SBI Forex Card Rates PDF** — [https://sbi.bank.in/documents/16012/1400784/FOREX_CARD_RATES.pdf](https://sbi.bank.in/documents/16012/1400784/FOREX_CARD_RATES.pdf)
+* 👉 **LME Copper & Aluminum (Westmetall)** — [LME Copper](https://www.westmetall.com/en/markdaten.php?action=table&field=LME_Cu_cash) / [LME Aluminum](https://www.westmetall.com/en/markdaten.php?action=table&field=LME_Al_cash)
 
 Coverage today:
 
@@ -186,7 +187,22 @@ erDiagram
         REAL cn_sell
         TIMESTAMP created_at
     }
+    lme_copper_rates {
+        DATE rate_date PK
+        REAL price
+        REAL price_3_month
+        INTEGER stock
+        TIMESTAMP created_at
+    }
+    lme_aluminum_rates {
+        DATE rate_date PK
+        REAL price
+        REAL price_3_month
+        INTEGER stock
+        TIMESTAMP created_at
+    }
     forex_rates_sbi ||--|| forex_rates_rbi : "aligned by rate_date/currency"
+    lme_copper_rates ||--|| lme_aluminum_rates : "daily LME cash seller"
 ```
 
 ---
@@ -235,6 +251,17 @@ for snapshot in history:
   * `"monthly"`
   * `"yearly"`
 
+### Seeding LME Copper & Aluminum
+
+Run the new helpers to ingest daily LME cash seller prices (data is available from 2008 onwards):
+
+```python
+fx.seed_lme("COPPER")
+fx.seed_lme("ALUMINUM")
+```
+
+These functions populate the bundled SQLite database and mirror into any configured external backend.
+
 > Legacy note: the former `.rates()` helper now lives on as a deprecated alias of `.history()`; new code should prefer `.history()` or `.historical()`.
 
 ---
@@ -245,7 +272,7 @@ for snapshot in history:
 from datetime import date
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.2.1
+print(FxBharat.__version__)  # 0.3.0
 
 # Default Usage
 fx = FxBharat()

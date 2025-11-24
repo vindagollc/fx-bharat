@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, Sequence, cast
 
 from fx_bharat.db import DEFAULT_SQLITE_DB_PATH
-from fx_bharat.ingestion.models import ForexRateRecord
+from fx_bharat.ingestion.models import ForexRateRecord, LmeRateRecord
 from fx_bharat.utils.logger import get_logger
 
 LOGGER = get_logger(__name__)
@@ -57,6 +57,24 @@ else:  # pragma: no cover - module import time
         last_ingested_date = Column(Date, nullable=False)
         updated_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
 
+    class _LmeCopperRate(Base):
+        __tablename__ = "lme_copper_rates"
+
+        rate_date = Column(Date, primary_key=True)
+        price = Column(Float, nullable=True)
+        price_3_month = Column(Float, nullable=True)
+        stock = Column(Float, nullable=True)
+        created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+
+    class _LmeAluminumRate(Base):
+        __tablename__ = "lme_aluminum_rates"
+
+        rate_date = Column(Date, primary_key=True)
+        price = Column(Float, nullable=True)
+        price_3_month = Column(Float, nullable=True)
+        stock = Column(Float, nullable=True)
+        created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+
 
 if TYPE_CHECKING:  # pragma: no cover - type checker helper
     from sqlalchemy.engine import Engine
@@ -97,6 +115,22 @@ CREATE TABLE IF NOT EXISTS ingestion_metadata (
     source TEXT PRIMARY KEY,
     last_ingested_date DATE NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS lme_copper_rates (
+    rate_date DATE PRIMARY KEY,
+    price REAL,
+    price_3_month REAL,
+    stock INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS lme_aluminum_rates (
+    rate_date DATE PRIMARY KEY,
+    price REAL,
+    price_3_month REAL,
+    stock INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -142,6 +176,26 @@ SET rate = ?,
 WHERE rate_date = ? AND currency = ?;
 """
 
+INSERT_LME_COPPER_STATEMENT = """
+INSERT OR REPLACE INTO lme_copper_rates(
+    rate_date,
+    price,
+    price_3_month,
+    stock
+)
+VALUES(?, ?, ?, ?);
+"""
+
+INSERT_LME_ALUMINUM_STATEMENT = """
+INSERT OR REPLACE INTO lme_aluminum_rates(
+    rate_date,
+    price,
+    price_3_month,
+    stock
+)
+VALUES(?, ?, ?, ?);
+"""
+
 
 @dataclass(slots=True)
 class PersistenceResult:
@@ -181,6 +235,14 @@ class _BackendProtocol(Protocol):
     def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
         ...  # pragma: no cover - protocol definition
 
+    def insert_lme_rates(self, metal: str, rows: Sequence[LmeRateRecord]) -> PersistenceResult:
+        ...  # pragma: no cover - protocol definition
+
+    def fetch_lme_range(
+        self, metal: str, start: date | None = None, end: date | None = None
+    ) -> list[LmeRateRecord]:
+        ...  # pragma: no cover - protocol definition
+
 
 class _SQLAlchemyBackend:
     """SQLAlchemy implementation used when the dependency is available."""
@@ -199,6 +261,15 @@ class _SQLAlchemyBackend:
         self._SessionFactory: sessionmaker[Session] = sessionmaker(
             bind=self.engine, expire_on_commit=False, future=True
         )
+
+    @staticmethod
+    def _resolve_lme_model(metal: str):
+        normalised = metal.upper()
+        if normalised in {"CU", "COPPER"}:
+            return _LmeCopperRate
+        if normalised in {"AL", "ALUMINUM", "ALUMINIUM"}:
+            return _LmeAluminumRate
+        raise ValueError(f"Unsupported LME metal: {metal}")
 
     def insert_rates(self, rows: Sequence[ForexRateRecord]) -> PersistenceResult:
         result = PersistenceResult()
@@ -250,6 +321,33 @@ class _SQLAlchemyBackend:
                     else:
                         setattr(rbi_existing, "rate", row.rate)
                         result.updated += 1
+            session.commit()
+        return result
+
+    def insert_lme_rates(self, metal: str, rows: Sequence[LmeRateRecord]) -> PersistenceResult:
+        model = self._resolve_lme_model(metal)
+        result = PersistenceResult()
+        if not rows:
+            return result
+        with self._SessionFactory() as session:
+            for row in rows:
+                pk = {"rate_date": row.rate_date}
+                existing = session.get(model, pk)
+                if existing is None:
+                    session.add(
+                        model(
+                            rate_date=row.rate_date,
+                            price=row.price,
+                            price_3_month=row.price_3_month,
+                            stock=row.stock,
+                        )
+                    )
+                    result.inserted += 1
+                else:
+                    setattr(existing, "price", row.price)
+                    setattr(existing, "price_3_month", row.price_3_month)
+                    setattr(existing, "stock", row.stock)
+                    result.updated += 1
             session.commit()
         return result
 
@@ -307,6 +405,29 @@ class _SQLAlchemyBackend:
                 )
         return records
 
+    def fetch_lme_range(
+        self, metal: str, start: date | None = None, end: date | None = None
+    ) -> list[LmeRateRecord]:
+        model = self._resolve_lme_model(metal)
+        records: list[LmeRateRecord] = []
+        with self._SessionFactory() as session:
+            stmt = select(model).order_by(model.rate_date)
+            if start is not None:
+                stmt = stmt.where(model.rate_date >= start)
+            if end is not None:
+                stmt = stmt.where(model.rate_date <= end)
+            for db_row in session.execute(stmt).scalars():
+                records.append(
+                    LmeRateRecord(
+                        rate_date=cast(date, db_row.rate_date),
+                        price=cast(float | None, db_row.price),
+                        price_3_month=cast(float | None, db_row.price_3_month),
+                        stock=cast(int | None, db_row.stock),
+                        metal="COPPER" if model is _LmeCopperRate else "ALUMINUM",
+                    )
+                )
+        return records
+
     def latest_rate_date(self, source: str) -> date | None:
         stmt = select(
             func.max(_SbiRate.rate_date)
@@ -347,6 +468,15 @@ class _SQLiteFallbackBackend:
         self._connection.row_factory = sqlite3.Row
         self._connection.executescript(SCHEMA)
         self._connection.commit()
+
+    @staticmethod
+    def _resolve_lme_table(metal: str) -> tuple[str, str]:
+        normalised = metal.upper()
+        if normalised in {"CU", "COPPER"}:
+            return "lme_copper_rates", INSERT_LME_COPPER_STATEMENT
+        if normalised in {"AL", "ALUMINUM", "ALUMINIUM"}:
+            return "lme_aluminum_rates", INSERT_LME_ALUMINUM_STATEMENT
+        raise ValueError(f"Unsupported LME metal: {metal}")
 
     def insert_rates(self, rows: Sequence[ForexRateRecord]) -> PersistenceResult:
         result = PersistenceResult()
@@ -407,6 +537,43 @@ class _SQLiteFallbackBackend:
                             row.rate,
                             row.rate_date.isoformat(),
                             row.currency,
+                        ),
+                    ).rowcount
+                    result.updated += updated
+        return result
+
+    def insert_lme_rates(self, metal: str, rows: Sequence[LmeRateRecord]) -> PersistenceResult:
+        table, statement = self._resolve_lme_table(metal)
+        result = PersistenceResult()
+        if not rows:
+            return result
+        with self._connection:
+            for row in rows:
+                inserted = self._connection.execute(
+                    statement,
+                    (
+                        row.rate_date.isoformat(),
+                        row.price,
+                        row.price_3_month,
+                        row.stock,
+                    ),
+                ).rowcount
+                if inserted:
+                    result.inserted += inserted
+                else:
+                    updated = self._connection.execute(
+                        f"""
+                        UPDATE {table}
+                        SET price = ?,
+                            price_3_month = ?,
+                            stock = ?
+                        WHERE rate_date = ?
+                        """,
+                        (
+                            row.price,
+                            row.price_3_month,
+                            row.stock,
+                            row.rate_date.isoformat(),
                         ),
                     ).rowcount
                     result.updated += updated
@@ -475,6 +642,39 @@ class _SQLiteFallbackBackend:
 
         return records
 
+    def fetch_lme_range(
+        self, metal: str, start: date | None = None, end: date | None = None
+    ) -> list[LmeRateRecord]:
+        table, _ = self._resolve_lme_table(metal)
+
+        def _build_query() -> tuple[str, list[str]]:
+            clauses: list[str] = []
+            params: list[str] = []
+            if start is not None:
+                clauses.append("rate_date >= ?")
+                params.append(start.isoformat())
+            if end is not None:
+                clauses.append("rate_date <= ?")
+                params.append(end.isoformat())
+            where = ""
+            if clauses:
+                where = " WHERE " + " AND ".join(clauses)
+            return (f"SELECT * FROM {table}{where} ORDER BY rate_date", params)
+
+        query, params = _build_query()
+        records: list[LmeRateRecord] = []
+        for row in self._connection.execute(query, params).fetchall():
+            records.append(
+                LmeRateRecord(
+                    rate_date=date.fromisoformat(row["rate_date"]),
+                    price=row["price"],
+                    price_3_month=row["price_3_month"],
+                    stock=row["stock"],
+                    metal="COPPER" if table.endswith("copper_rates") else "ALUMINUM",
+                )
+            )
+        return records
+
     def latest_rate_date(self, source: str) -> date | None:
         table = "forex_rates_sbi" if source.upper() == "SBI" else "forex_rates_rbi"
         cursor = self._connection.execute(f"SELECT MAX(rate_date) AS latest FROM {table}")
@@ -541,6 +741,22 @@ class SQLiteManager:
         source: str | None = None,
     ) -> list[ForexRateRecord]:
         return self._backend.fetch_range(start, end, source=source)
+
+    def insert_lme_rates(self, metal: str, rows: Sequence[LmeRateRecord]) -> PersistenceResult:
+        result = self._backend.insert_lme_rates(metal, rows)
+        LOGGER.info(
+            "Inserted %s %s rows, updated %s rows (total %s)",
+            result.inserted,
+            metal,
+            result.updated,
+            result.total,
+        )
+        return result
+
+    def fetch_lme_range(
+        self, metal: str, start: date | None = None, end: date | None = None
+    ) -> list[LmeRateRecord]:
+        return self._backend.fetch_lme_range(metal, start, end)
 
     def close(self) -> None:  # pragma: no cover - trivial
         self._backend.close()

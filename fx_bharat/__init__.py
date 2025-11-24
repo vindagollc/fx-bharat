@@ -20,6 +20,7 @@ from fx_bharat.db.postgres_backend import PostgresBackend
 from fx_bharat.db.sqlite_backend import SQLiteBackend
 from fx_bharat.db.sqlite_manager import PersistenceResult, SQLiteManager
 from fx_bharat.ingestion.models import ForexRateRecord
+from fx_bharat.ingestion.models import LmeRateRecord
 from fx_bharat.utils.rbi import RBI_MIN_AVAILABLE_DATE, enforce_rbi_min_date
 
 try:  # pragma: no cover - imported lazily
@@ -40,6 +41,9 @@ __all__ = [
     "FxBharat",
     "seed_rbi_forex",
     "seed_sbi_forex",
+    "seed_lme_prices",
+    "seed_lme_copper",
+    "seed_lme_aluminum",
     "SQLiteManager",
     "PersistenceResult",
     "RBISeleniumClient",
@@ -48,7 +52,7 @@ __all__ = [
 try:
     __version__ = importlib_metadata.version("fx-bharat")
 except importlib_metadata.PackageNotFoundError:  # pragma: no cover - fallback for local runs
-    __version__ = "0.2.1"
+    __version__ = "0.3.0"
 
 
 def seed_rbi_forex(*args, **kwargs):
@@ -73,6 +77,24 @@ def seed_sbi_today(*args, **kwargs):
     from fx_bharat.seeds.populate_sbi_forex import seed_sbi_today as _seed_sbi_today
 
     return _seed_sbi_today(*args, **kwargs)
+
+
+def seed_lme_prices(*args, **kwargs):
+    from fx_bharat.seeds.populate_lme import seed_lme_prices as _seed_lme_prices
+
+    return _seed_lme_prices(*args, **kwargs)
+
+
+def seed_lme_copper(*args, **kwargs):
+    from fx_bharat.seeds.populate_lme import seed_lme_copper as _seed_lme_copper
+
+    return _seed_lme_copper(*args, **kwargs)
+
+
+def seed_lme_aluminum(*args, **kwargs):
+    from fx_bharat.seeds.populate_lme import seed_lme_aluminum as _seed_lme_aluminum
+
+    return _seed_lme_aluminum(*args, **kwargs)
 
 
 class DatabaseBackend(str, Enum):
@@ -297,11 +319,20 @@ class FxBharat:
         source_backend = SQLiteBackend(DEFAULT_SQLITE_DB_PATH)
         try:
             rows = source_backend.fetch_range()
+            lme_fetcher = getattr(source_backend, "fetch_lme_range", None)
+            lme_copper = lme_fetcher("COPPER") if callable(lme_fetcher) else []
+            lme_aluminum = lme_fetcher("ALUMINUM") if callable(lme_fetcher) else []
         finally:
             source_backend.close()
         target_backend = self._get_backend_strategy()
         target_backend.ensure_schema()
         target_backend.insert_rates(rows)
+        for metal, lme_rows in {
+            "COPPER": lme_copper,
+            "ALUMINUM": lme_aluminum,
+        }.items():
+            if lme_rows:
+                target_backend.insert_lme_rates(metal, lme_rows)
 
     def seed(
         self,
@@ -389,6 +420,39 @@ class FxBharat:
             target_backend = self._get_backend_strategy()
             target_backend.ensure_schema()
             target_backend.insert_rates(rows)
+
+    def seed_lme(
+        self,
+        metal: Literal["COPPER", "ALUMINUM"],
+        *,
+        from_date: date | None = None,
+        to_date: date | None = None,
+        dry_run: bool = False,
+    ) -> PersistenceResult:
+        """Seed LME prices into SQLite and mirror to an external backend if configured."""
+
+        sqlite_db_path = (
+            Path(self.sqlite_manager.db_path)
+            if self.sqlite_manager is not None
+            else DEFAULT_SQLITE_DB_PATH
+        )
+        seed_result = seed_lme_prices(
+            metal,
+            db_path=sqlite_db_path,
+            start=from_date,
+            end=to_date,
+            dry_run=dry_run,
+        )
+        if dry_run:
+            return seed_result.rows
+
+        if self.connection_info.is_external:
+            backend = self._get_backend_strategy()
+            backend.ensure_schema()
+            with SQLiteManager(sqlite_db_path) as manager:
+                lme_rows = manager.fetch_lme_range(metal, from_date, to_date)
+            backend.insert_lme_rates(metal, lme_rows)
+        return seed_result.rows
 
     def rate(
         self,
