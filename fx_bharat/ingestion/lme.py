@@ -71,33 +71,52 @@ def _find_column(columns: Iterable[object], keywords: set[str]) -> object | None
 
 
 def parse_lme_table(html: str, metal: str) -> LmeTableParseResult:
-    """Parse Westmetall HTML tables into structured records."""
+    """Parse Westmetall HTML tables into structured records.
+
+    The source pages render one table per year (and sometimes repeat header
+    rows inside the table body). We iterate over all detected tables and pick
+    the cash-settlement column as the USD price, falling back to the first
+    numeric column when currency hints are not present.
+    """
 
     normalised = _normalise_metal(metal)
     tables = pd.read_html(html, flavor="bs4")
     if not tables:
         raise ValueError("No tables found in supplied HTML")
-    frame = tables[0]
-    frame.columns = [str(col).strip() for col in frame.columns]
-    date_col = _find_column(frame.columns, {"date", "datum"}) or frame.columns[0]
-    usd_col = _find_column(frame.columns, {"usd", "$"})
-    eur_col = _find_column(frame.columns, {"eur", "€"})
-    usd_change_col = _find_column(frame.columns, {"usd change", "usd +/-", "usd +/-"})
-    eur_change_col = _find_column(frame.columns, {"eur change", "eur +/-", "eur +/-"})
+
+    def _first_numeric_column(frame: pd.DataFrame, *, exclude: set[object]) -> object | None:
+        for column in frame.columns:
+            if column in exclude:
+                continue
+            series = frame[column]
+            if series.apply(_parse_float).notna().any():
+                return column
+        return None
+
     rows: list[LmeRateRecord] = []
-    for _, row in frame.iterrows():
-        rate_date = _coerce_date(row.get(date_col))
-        if rate_date is None:
-            continue
-        record = LmeRateRecord(
-            rate_date=rate_date,
-            usd_price=_parse_float(row.get(usd_col)) if usd_col else None,
-            eur_price=_parse_float(row.get(eur_col)) if eur_col else None,
-            usd_change=_parse_float(row.get(usd_change_col)) if usd_change_col else None,
-            eur_change=_parse_float(row.get(eur_change_col)) if eur_change_col else None,
-            metal=normalised,
-        )
-        rows.append(record)
+    for frame in tables:
+        frame.columns = [str(col).strip() for col in frame.columns]
+        date_col = _find_column(frame.columns, {"date", "datum"}) or frame.columns[0]
+        cash_col = _find_column(frame.columns, {"cash", "settlement", "seller"})
+        usd_col = _find_column(frame.columns, {"usd", "$"}) or cash_col
+        eur_col = _find_column(frame.columns, {"eur", "€"})
+        usd_change_col = _find_column(frame.columns, {"usd change", "usd +/-", "usd +/-"})
+        eur_change_col = _find_column(frame.columns, {"eur change", "eur +/-", "eur +/-"})
+        if usd_col is None:
+            usd_col = _first_numeric_column(frame, exclude={date_col})
+        for _, row in frame.iterrows():
+            rate_date = _coerce_date(row.get(date_col))
+            if rate_date is None:
+                continue
+            record = LmeRateRecord(
+                rate_date=rate_date,
+                usd_price=_parse_float(row.get(usd_col)) if usd_col else None,
+                eur_price=_parse_float(row.get(eur_col)) if eur_col else None,
+                usd_change=_parse_float(row.get(usd_change_col)) if usd_change_col else None,
+                eur_change=_parse_float(row.get(eur_change_col)) if eur_change_col else None,
+                metal=normalised,
+            )
+            rows.append(record)
     return LmeTableParseResult(metal=normalised, rows=rows)
 
 

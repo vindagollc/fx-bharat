@@ -24,6 +24,30 @@ def test_parse_lme_table_handles_currency_columns():
     assert result.rows[0].eur_change == -20.0
 
 
+def test_parse_lme_table_handles_multiple_year_tables():
+    html = """
+    <table>
+        <tr class="shaded"><th>date</th><th>LME Aluminium Cash-Settlement</th><th>stock</th></tr>
+        <tr><td>31. December 2024</td><td>2,516.50</td><td>639,150</td></tr>
+        <tr><td>30. December 2024</td><td>2,529.50</td><td>643,650</td></tr>
+    </table>
+    <table>
+        <tr class="shaded"><th>date</th><th>LME Aluminium Cash-Settlement</th><th>stock</th></tr>
+        <tr><td>31. December 2023</td><td>2,100.00</td><td>700,000</td></tr>
+    </table>
+    """
+
+    result = parse_lme_table(html, "aluminum")
+
+    assert result.metal == "ALUMINUM"
+    assert [record.rate_date for record in result.rows] == [
+        date(2024, 12, 31),
+        date(2024, 12, 30),
+        date(2023, 12, 31),
+    ]
+    assert result.rows[0].usd_price == 2516.50
+
+
 def test_sqlite_manager_supports_lme(tmp_path):
     db_path = tmp_path / "lme.db"
     manager = SQLiteManager(db_path)
