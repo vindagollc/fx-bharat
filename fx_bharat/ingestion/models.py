@@ -30,10 +30,9 @@ class LmeRateRecord:
     """Representation of a single LME cash seller row."""
 
     rate_date: date
-    usd_price: float | None
-    eur_price: float | None
-    usd_change: float | None = None
-    eur_change: float | None = None
+    price: float | None
+    price_3_month: float | None
+    stock: int | None
     metal: Literal["ALUMINUM", "COPPER"] | str = "COPPER"
 
 

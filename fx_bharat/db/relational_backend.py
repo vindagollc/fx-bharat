@@ -56,10 +56,9 @@ CREATE TABLE IF NOT EXISTS forex_rates_sbi (
 SCHEMA_SQL_LME_COPPER = """
 CREATE TABLE IF NOT EXISTS lme_copper_rates (
     rate_date DATE NOT NULL,
-    usd_price NUMERIC(18, 6) NULL,
-    eur_price NUMERIC(18, 6) NULL,
-    usd_change NUMERIC(18, 6) NULL,
-    eur_change NUMERIC(18, 6) NULL,
+    price NUMERIC(18, 6) NULL,
+    price_3_month NUMERIC(18, 6) NULL,
+    stock NUMERIC(18, 6) NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(rate_date)
 );
@@ -68,10 +67,9 @@ CREATE TABLE IF NOT EXISTS lme_copper_rates (
 SCHEMA_SQL_LME_ALUMINUM = """
 CREATE TABLE IF NOT EXISTS lme_aluminum_rates (
     rate_date DATE NOT NULL,
-    usd_price NUMERIC(18, 6) NULL,
-    eur_price NUMERIC(18, 6) NULL,
-    usd_change NUMERIC(18, 6) NULL,
-    eur_change NUMERIC(18, 6) NULL,
+    price NUMERIC(18, 6) NULL,
+    price_3_month NUMERIC(18, 6) NULL,
+    stock NUMERIC(18, 6) NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(rate_date)
 );
@@ -121,13 +119,13 @@ VALUES(
 """
 
 INSERT_LME_COPPER_SQL = """
-INSERT INTO lme_copper_rates(rate_date, usd_price, eur_price, usd_change, eur_change, created_at)
-VALUES(:rate_date, :usd_price, :eur_price, :usd_change, :eur_change, :created_at)
+INSERT INTO lme_copper_rates(rate_date, price, price_3_month, stock, created_at)
+VALUES(:rate_date, :price, :price_3_month, :stock, :created_at)
 """
 
 INSERT_LME_ALUMINUM_SQL = """
-INSERT INTO lme_aluminum_rates(rate_date, usd_price, eur_price, usd_change, eur_change, created_at)
-VALUES(:rate_date, :usd_price, :eur_price, :usd_change, :eur_change, :created_at)
+INSERT INTO lme_aluminum_rates(rate_date, price, price_3_month, stock, created_at)
+VALUES(:rate_date, :price, :price_3_month, :stock, :created_at)
 """
 
 DELETE_LME_COPPER_SQL = "DELETE FROM lme_copper_rates WHERE rate_date = :rate_date"
@@ -221,10 +219,9 @@ class RelationalBackend(BackendStrategy):
             for row in rows:
                 params = {
                     "rate_date": row.rate_date,
-                    "usd_price": row.usd_price,
-                    "eur_price": row.eur_price,
-                    "usd_change": row.usd_change,
-                    "eur_change": row.eur_change,
+                    "price": row.price,
+                    "price_3_month": row.price_3_month,
+                    "stock": row.stock,
                     "created_at": datetime.utcnow(),
                 }
                 connection.execute(text(delete_sql), params)
@@ -332,10 +329,9 @@ class RelationalBackend(BackendStrategy):
                 records.append(
                     LmeRateRecord(
                         rate_date=_normalise_rate_date(mapping["rate_date"]),
-                        usd_price=casting_float(mapping.get("usd_price")),
-                        eur_price=casting_float(mapping.get("eur_price")),
-                        usd_change=casting_float(mapping.get("usd_change")),
-                        eur_change=casting_float(mapping.get("eur_change")),
+                        price=casting_float(mapping.get("price")),
+                        price_3_month=casting_float(mapping.get("price_3_month")),
+                        stock=int(casting_float(mapping.get("stock"))) if mapping.get("stock") is not None else None,
                         metal=normalised,
                     )
                 )

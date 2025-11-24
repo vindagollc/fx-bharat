@@ -128,10 +128,9 @@ class MongoBackend(BackendStrategy):
         for row in rows:
             doc = {
                 "rate_date": row.rate_date.isoformat(),
-                "usd_price": row.usd_price,
-                "eur_price": row.eur_price,
-                "usd_change": row.usd_change,
-                "eur_change": row.eur_change,
+                "price": row.price,
+                "price_3_month": row.price_3_month,
+                "stock": row.stock,
                 "created_at": datetime.utcnow(),
             }
             operations.append(
@@ -221,10 +220,9 @@ class MongoBackend(BackendStrategy):
         return [
             LmeRateRecord(
                 rate_date=date.fromisoformat(doc["rate_date"]),
-                usd_price=doc.get("usd_price"),
-                eur_price=doc.get("eur_price"),
-                usd_change=doc.get("usd_change"),
-                eur_change=doc.get("eur_change"),
+                price=doc.get("price"),
+                price_3_month=doc.get("price_3_month"),
+                stock=doc.get("stock"),
                 metal=normalised,
             )
             for doc in docs

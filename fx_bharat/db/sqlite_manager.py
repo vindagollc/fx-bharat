@@ -61,20 +61,18 @@ else:  # pragma: no cover - module import time
         __tablename__ = "lme_copper_rates"
 
         rate_date = Column(Date, primary_key=True)
-        usd_price = Column(Float, nullable=True)
-        eur_price = Column(Float, nullable=True)
-        usd_change = Column(Float, nullable=True)
-        eur_change = Column(Float, nullable=True)
+        price = Column(Float, nullable=True)
+        price_3_month = Column(Float, nullable=True)
+        stock = Column(Float, nullable=True)
         created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
 
     class _LmeAluminumRate(Base):
         __tablename__ = "lme_aluminum_rates"
 
         rate_date = Column(Date, primary_key=True)
-        usd_price = Column(Float, nullable=True)
-        eur_price = Column(Float, nullable=True)
-        usd_change = Column(Float, nullable=True)
-        eur_change = Column(Float, nullable=True)
+        price = Column(Float, nullable=True)
+        price_3_month = Column(Float, nullable=True)
+        stock = Column(Float, nullable=True)
         created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
 
 
@@ -121,19 +119,17 @@ CREATE TABLE IF NOT EXISTS ingestion_metadata (
 
 CREATE TABLE IF NOT EXISTS lme_copper_rates (
     rate_date DATE PRIMARY KEY,
-    usd_price REAL,
-    eur_price REAL,
-    usd_change REAL,
-    eur_change REAL,
+    price REAL,
+    price_3_month REAL,
+    stock INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS lme_aluminum_rates (
     rate_date DATE PRIMARY KEY,
-    usd_price REAL,
-    eur_price REAL,
-    usd_change REAL,
-    eur_change REAL,
+    price REAL,
+    price_3_month REAL,
+    stock INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -183,23 +179,21 @@ WHERE rate_date = ? AND currency = ?;
 INSERT_LME_COPPER_STATEMENT = """
 INSERT OR REPLACE INTO lme_copper_rates(
     rate_date,
-    usd_price,
-    eur_price,
-    usd_change,
-    eur_change
+    price,
+    price_3_month,
+    stock
 )
-VALUES(?, ?, ?, ?, ?);
+VALUES(?, ?, ?, ?);
 """
 
 INSERT_LME_ALUMINUM_STATEMENT = """
 INSERT OR REPLACE INTO lme_aluminum_rates(
     rate_date,
-    usd_price,
-    eur_price,
-    usd_change,
-    eur_change
+    price,
+    price_3_month,
+    stock
 )
-VALUES(?, ?, ?, ?, ?);
+VALUES(?, ?, ?, ?);
 """
 
 
@@ -343,18 +337,16 @@ class _SQLAlchemyBackend:
                     session.add(
                         model(
                             rate_date=row.rate_date,
-                            usd_price=row.usd_price,
-                            eur_price=row.eur_price,
-                            usd_change=row.usd_change,
-                            eur_change=row.eur_change,
+                            price=row.price,
+                            price_3_month=row.price_3_month,
+                            stock=row.stock,
                         )
                     )
                     result.inserted += 1
                 else:
-                    setattr(existing, "usd_price", row.usd_price)
-                    setattr(existing, "eur_price", row.eur_price)
-                    setattr(existing, "usd_change", row.usd_change)
-                    setattr(existing, "eur_change", row.eur_change)
+                    setattr(existing, "price", row.price)
+                    setattr(existing, "price_3_month", row.price_3_month)
+                    setattr(existing, "stock", row.stock)
                     result.updated += 1
             session.commit()
         return result
@@ -428,10 +420,9 @@ class _SQLAlchemyBackend:
                 records.append(
                     LmeRateRecord(
                         rate_date=cast(date, db_row.rate_date),
-                        usd_price=cast(float | None, db_row.usd_price),
-                        eur_price=cast(float | None, db_row.eur_price),
-                        usd_change=cast(float | None, db_row.usd_change),
-                        eur_change=cast(float | None, db_row.eur_change),
+                        price=cast(float | None, db_row.price),
+                        price_3_month=cast(float | None, db_row.price_3_month),
+                        stock=cast(int | None, db_row.stock),
                         metal="COPPER" if model is _LmeCopperRate else "ALUMINUM",
                     )
                 )
@@ -562,10 +553,9 @@ class _SQLiteFallbackBackend:
                     statement,
                     (
                         row.rate_date.isoformat(),
-                        row.usd_price,
-                        row.eur_price,
-                        row.usd_change,
-                        row.eur_change,
+                        row.price,
+                        row.price_3_month,
+                        row.stock,
                     ),
                 ).rowcount
                 if inserted:
@@ -574,17 +564,15 @@ class _SQLiteFallbackBackend:
                     updated = self._connection.execute(
                         f"""
                         UPDATE {table}
-                        SET usd_price = ?,
-                            eur_price = ?,
-                            usd_change = ?,
-                            eur_change = ?
+                        SET price = ?,
+                            price_3_month = ?,
+                            stock = ?
                         WHERE rate_date = ?
                         """,
                         (
-                            row.usd_price,
-                            row.eur_price,
-                            row.usd_change,
-                            row.eur_change,
+                            row.price,
+                            row.price_3_month,
+                            row.stock,
                             row.rate_date.isoformat(),
                         ),
                     ).rowcount
@@ -679,10 +667,9 @@ class _SQLiteFallbackBackend:
             records.append(
                 LmeRateRecord(
                     rate_date=date.fromisoformat(row["rate_date"]),
-                    usd_price=row["usd_price"],
-                    eur_price=row["eur_price"],
-                    usd_change=row["usd_change"],
-                    eur_change=row["eur_change"],
+                    price=row["price"],
+                    price_3_month=row["price_3_month"],
+                    stock=row["stock"],
                     metal="COPPER" if table.endswith("copper_rates") else "ALUMINUM",
                 )
             )

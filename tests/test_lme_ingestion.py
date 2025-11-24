@@ -18,10 +18,8 @@ def test_parse_lme_table_handles_currency_columns():
         date(2024, 11, 21),
         date(2024, 11, 20),
     ]
-    assert result.rows[0].usd_price == 8500.0
-    assert result.rows[0].eur_price == 7800.0
-    assert result.rows[0].usd_change == 50.0
-    assert result.rows[0].eur_change == -20.0
+    assert result.rows[0].price == 8500.0
+    assert result.rows[0].price_3_month == 7800.0
 
 
 def test_parse_lme_table_handles_multiple_year_tables():
@@ -45,7 +43,7 @@ def test_parse_lme_table_handles_multiple_year_tables():
         date(2024, 12, 30),
         date(2023, 12, 31),
     ]
-    assert result.rows[0].usd_price == 2516.50
+    assert result.rows[0].price == 2516.50
 
 
 def test_sqlite_manager_supports_lme(tmp_path):
@@ -55,16 +53,16 @@ def test_sqlite_manager_supports_lme(tmp_path):
         records = [
             LmeRateRecord(
                 rate_date=date(2024, 11, 21),
-                usd_price=8500.0,
-                eur_price=7800.0,
-                usd_change=50.0,
-                eur_change=-20.0,
+                price=8500.0,
+                price_3_month=7800.0,
+                stock=123,
                 metal="COPPER",
             ),
             LmeRateRecord(
                 rate_date=date(2024, 11, 22),
-                usd_price=8550.0,
-                eur_price=7850.0,
+                price=8550.0,
+                price_3_month=7850.0,
+                stock=456,
                 metal="ALUMINUM",
             ),
         ]
@@ -75,7 +73,7 @@ def test_sqlite_manager_supports_lme(tmp_path):
     finally:
         manager.close()
     assert len(fetched_cu) == 1
-    assert fetched_cu[0].usd_price == 8500.0
+    assert fetched_cu[0].price == 8500.0
     assert len(fetched_al) == 1
     assert fetched_al[0].metal == "ALUMINUM"
 
@@ -123,4 +121,4 @@ def test_parse_lme_table_joins_split_date_cells():
         date(2024, 12, 31),
         date(2023, 12, 30),
     ]
-    assert result.rows[0].usd_price == 2516.5
+    assert result.rows[0].price == 2516.5

@@ -189,18 +189,16 @@ erDiagram
     }
     lme_copper_rates {
         DATE rate_date PK
-        REAL usd_price
-        REAL eur_price
-        REAL usd_change
-        REAL eur_change
+        REAL price
+        REAL price_3_month
+        INTEGER stock
         TIMESTAMP created_at
     }
     lme_aluminum_rates {
         DATE rate_date PK
-        REAL usd_price
-        REAL eur_price
-        REAL usd_change
-        REAL eur_change
+        REAL price
+        REAL price_3_month
+        INTEGER stock
         TIMESTAMP created_at
     }
     forex_rates_sbi ||--|| forex_rates_rbi : "aligned by rate_date/currency"

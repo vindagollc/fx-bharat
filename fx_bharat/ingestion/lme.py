@@ -53,6 +53,16 @@ def _parse_float(value: object | None) -> float | None:
         return None
 
 
+def _parse_int(value: object | None) -> int | None:
+    parsed = _parse_float(value)
+    if parsed is None:
+        return None
+    try:
+        return int(parsed)
+    except (TypeError, ValueError):
+        return None
+
+
 def _coerce_date(value: object) -> date | None:
     if isinstance(value, str):
         value = re.sub(r"\s+", " ", value.strip())
@@ -122,36 +132,47 @@ def parse_lme_table(html: str, metal: str) -> LmeTableParseResult:
     if not dataframes:
         raise ValueError("No data rows found in supplied HTML")
 
-    def _first_numeric_column(frame: pd.DataFrame, *, exclude: set[object]) -> object | None:
+    def _numeric_columns(frame: pd.DataFrame, *, exclude: set[object]) -> list[object]:
+        numerics: list[object] = []
         for column in frame.columns:
             if column in exclude:
                 continue
             series = frame[column]
             if series.apply(_parse_float).notna().any():
-                return column
-        return None
+                numerics.append(column)
+        return numerics
 
     rows: list[LmeRateRecord] = []
     for frame in dataframes:
         frame.columns = [str(col).strip() for col in frame.columns]
         date_col = _find_column(frame.columns, {"date", "datum"}) or frame.columns[0]
-        cash_col = _find_column(frame.columns, {"cash", "settlement", "seller"})
-        usd_col = _find_column(frame.columns, {"usd", "$"}) or cash_col
-        eur_col = _find_column(frame.columns, {"eur", "€"})
-        usd_change_col = _find_column(frame.columns, {"usd change", "usd +/-", "usd +/-"})
-        eur_change_col = _find_column(frame.columns, {"eur change", "eur +/-", "eur +/-"})
-        if usd_col is None:
-            usd_col = _first_numeric_column(frame, exclude={date_col})
+        price_col = _find_column(frame.columns, {"cash", "settlement", "seller"})
+        three_month_col = _find_column(frame.columns, {"3-month", "3 month", "3m"})
+        stock_col = _find_column(frame.columns, {"stock", "stocks"})
+
+        numeric_cols = _numeric_columns(frame, exclude={date_col})
+        if price_col is None and numeric_cols:
+            price_col = numeric_cols[0]
+        if three_month_col is None and len(numeric_cols) > 1:
+            fallback_index = 1 if numeric_cols[0] == price_col else 0
+            three_month_candidates = [col for col in numeric_cols if col != price_col]
+            if three_month_candidates:
+                three_month_col = three_month_candidates[0]
+            elif len(numeric_cols) > fallback_index:
+                three_month_col = numeric_cols[fallback_index]
+        if stock_col is None and numeric_cols:
+            candidates = [col for col in numeric_cols if col not in {price_col, three_month_col}]
+            if candidates:
+                stock_col = candidates[-1]
         for _, row in frame.iterrows():
             rate_date = _coerce_date(row.get(date_col))
             if rate_date is None:
                 continue
             record = LmeRateRecord(
                 rate_date=rate_date,
-                usd_price=_parse_float(row.get(usd_col)) if usd_col else None,
-                eur_price=_parse_float(row.get(eur_col)) if eur_col else None,
-                usd_change=_parse_float(row.get(usd_change_col)) if usd_change_col else None,
-                eur_change=_parse_float(row.get(eur_change_col)) if eur_change_col else None,
+                price=_parse_float(row.get(price_col)) if price_col else None,
+                price_3_month=_parse_float(row.get(three_month_col)) if three_month_col else None,
+                stock=_parse_int(row.get(stock_col)) if stock_col else None,
                 metal=normalised,
             )
             rows.append(record)
