@@ -85,3 +85,42 @@ def test_lme_urls_defined():
     assert "ALUMINUM" in LME_URLS
     assert "LME_Cu_cash" in LME_URLS["COPPER"]
     assert "LME_Al_cash" in LME_URLS["ALUMINUM"]
+
+
+def test_parse_lme_table_joins_split_date_cells():
+    html = """
+    <a id="y2024"></a>
+    <table>
+        <thead>
+            <tr class="shaded"><th>date</th><th>LME Aluminium Cash-Settlement</th><th>stock</th></tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><span>31.</span> <span>Decem</span><span>ber</span> <span>2024</span></td>
+                <td>2,516.50</td>
+                <td>639,150</td>
+            </tr>
+        </tbody>
+    </table>
+    <a id="y2023"></a>
+    <table>
+        <thead>
+            <tr class="shaded"><th>date</th><th>LME Aluminium Cash-Settlement</th><th>stock</th></tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><span>30.</span> <span>Decem</span><span>ber</span> <span>2023</span></td>
+                <td>2,111.00</td>
+                <td>700,000</td>
+            </tr>
+        </tbody>
+    </table>
+    """
+
+    result = parse_lme_table(html, "aluminum")
+
+    assert [record.rate_date for record in result.rows] == [
+        date(2024, 12, 31),
+        date(2023, 12, 30),
+    ]
+    assert result.rows[0].usd_price == 2516.5

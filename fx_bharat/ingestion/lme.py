@@ -9,6 +9,7 @@ from typing import Iterable, Literal
 
 import pandas as pd
 import requests
+from bs4 import BeautifulSoup
 
 from fx_bharat.ingestion.models import LmeRateRecord
 from fx_bharat.utils.logger import get_logger
@@ -53,6 +54,9 @@ def _parse_float(value: object | None) -> float | None:
 
 
 def _coerce_date(value: object) -> date | None:
+    if isinstance(value, str):
+        value = re.sub(r"\s+", " ", value.strip())
+        value = re.sub(r"([A-Za-z]{2,})\s+([A-Za-z]{2,})", r"\1\2", value)
     try:
         parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
     except (TypeError, ValueError):
@@ -73,16 +77,50 @@ def _find_column(columns: Iterable[object], keywords: set[str]) -> object | None
 def parse_lme_table(html: str, metal: str) -> LmeTableParseResult:
     """Parse Westmetall HTML tables into structured records.
 
-    The source pages render one table per year (and sometimes repeat header
-    rows inside the table body). We iterate over all detected tables and pick
-    the cash-settlement column as the USD price, falling back to the first
-    numeric column when currency hints are not present.
+    The source pages render one table per year (anchored by ``#yYYYY``) and
+    sometimes repeat header rows inside each table body. Rather than relying on
+    :func:`pandas.read_html` to guess the header structure, we parse tables with
+    BeautifulSoup to preserve every data row and then map the appropriate
+    numeric columns (cash-settlement first, otherwise any numeric column).
     """
 
+    def _cell_text(cell) -> str:
+        return " ".join(cell.stripped_strings).strip()
+
     normalised = _normalise_metal(metal)
-    tables = pd.read_html(html, flavor="bs4")
+    soup = BeautifulSoup(html, "html.parser")
+
+    tables: list[object] = []
+    for anchor in soup.find_all("a", id=re.compile(r"^y\d{4}$")):
+        table = anchor.find_next("table")
+        if table:
+            tables.append(table)
+    if not tables:
+        tables = soup.find_all("table")
     if not tables:
         raise ValueError("No tables found in supplied HTML")
+
+    dataframes: list[pd.DataFrame] = []
+    for table in tables:
+        headers = [
+            _cell_text(th) for th in table.find_all("th") if _cell_text(th)
+        ]
+        rows: list[list[str]] = []
+        for tr in table.find_all("tr"):
+            cols = tr.find_all("td")
+            if not cols:
+                continue
+            rows.append([_cell_text(col) for col in cols])
+        if not rows:
+            continue
+        if headers and len(headers) == len(rows[0]):
+            frame = pd.DataFrame(rows, columns=headers)
+        else:
+            frame = pd.DataFrame(rows)
+        dataframes.append(frame)
+
+    if not dataframes:
+        raise ValueError("No data rows found in supplied HTML")
 
     def _first_numeric_column(frame: pd.DataFrame, *, exclude: set[object]) -> object | None:
         for column in frame.columns:
@@ -94,7 +132,7 @@ def parse_lme_table(html: str, metal: str) -> LmeTableParseResult:
         return None
 
     rows: list[LmeRateRecord] = []
-    for frame in tables:
+    for frame in dataframes:
         frame.columns = [str(col).strip() for col in frame.columns]
         date_col = _find_column(frame.columns, {"date", "datum"}) or frame.columns[0]
         cash_col = _find_column(frame.columns, {"cash", "settlement", "seller"})
