@@ -274,21 +274,56 @@ class _SQLAlchemyBackend:
                 name: column_type for name, column_type in expected.items() if name not in existing
             }
 
+        def _rebuild_table(table: str) -> None:
+            desired = ["rate_date", "price", "price_3_month", "stock", "created_at"]
+            columns_csv = ", ".join(desired)
+            temp_table = f"{table}_tmp"
+            with self.engine.begin() as connection:
+                connection.execute(
+                    text(
+                        f"""
+                        CREATE TABLE {temp_table} (
+                            rate_date DATE PRIMARY KEY,
+                            price REAL,
+                            price_3_month REAL,
+                            stock INTEGER,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                        """
+                    )
+                )
+                connection.execute(
+                    text(
+                        f"""
+                        INSERT INTO {temp_table} ({columns_csv})
+                        SELECT {columns_csv}
+                        FROM {table}
+                        """
+                    )
+                )
+                connection.execute(text(f"DROP TABLE {table}"))
+                connection.execute(text(f"ALTER TABLE {temp_table} RENAME TO {table}"))
+
         lme_columns = {
             "price": "REAL",
             "price_3_month": "REAL",
             "stock": "INTEGER",
             "created_at": "TIMESTAMP",
         }
+        unwanted_columns = {"usd_price", "eur_price", "usd_change", "eur_change"}
         for table in ("lme_copper_rates", "lme_aluminum_rates"):
             missing = _missing_columns(table, lme_columns)
-            if not missing:
-                continue
-            with self.engine.begin() as connection:
-                for column_name, column_type in missing.items():
-                    connection.execute(
-                        text(f"ALTER TABLE {table} ADD COLUMN {column_name} {column_type}")
-                    )
+            if missing:
+                with self.engine.begin() as connection:
+                    for column_name, column_type in missing.items():
+                        connection.execute(
+                            text(f"ALTER TABLE {table} ADD COLUMN {column_name} {column_type}")
+                        )
+            with self.engine.connect() as connection:
+                result = connection.execute(text(f"PRAGMA table_info({table})"))
+                existing = {row[1] for row in result}
+            if unwanted_columns.intersection(existing):
+                _rebuild_table(table)
 
     @staticmethod
     def _resolve_lme_model(metal: str):
@@ -495,7 +530,39 @@ class _SQLiteFallbackBackend:
         self._connection.execute("PRAGMA foreign_keys = ON")
         self._connection.row_factory = sqlite3.Row
         self._connection.executescript(SCHEMA)
+        self._drop_unwanted_lme_columns()
         self._connection.commit()
+
+    def _drop_unwanted_lme_columns(self) -> None:
+        unwanted = {"usd_price", "eur_price", "usd_change", "eur_change"}
+        desired = ["rate_date", "price", "price_3_month", "stock", "created_at"]
+        columns_csv = ", ".join(desired)
+        for table in ("lme_copper_rates", "lme_aluminum_rates"):
+            cursor = self._connection.execute(f"PRAGMA table_info({table})")
+            existing = {row["name"] for row in cursor.fetchall()}
+            if not unwanted.intersection(existing):
+                continue
+            temp_table = f"{table}_tmp"
+            self._connection.execute(
+                f"""
+                CREATE TABLE {temp_table} (
+                    rate_date DATE PRIMARY KEY,
+                    price REAL,
+                    price_3_month REAL,
+                    stock INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            self._connection.execute(
+                f"""
+                INSERT INTO {temp_table} ({columns_csv})
+                SELECT {columns_csv}
+                FROM {table}
+                """
+            )
+            self._connection.execute(f"DROP TABLE {table}")
+            self._connection.execute(f"ALTER TABLE {temp_table} RENAME TO {table}")
 
     @staticmethod
     def _resolve_lme_table(metal: str) -> tuple[str, str]:

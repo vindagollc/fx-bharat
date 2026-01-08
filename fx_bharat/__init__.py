@@ -20,6 +20,7 @@ from fx_bharat.db.postgres_backend import PostgresBackend
 from fx_bharat.db.sqlite_backend import SQLiteBackend
 from fx_bharat.db.sqlite_manager import PersistenceResult, SQLiteManager
 from fx_bharat.ingestion.models import ForexRateRecord, LmeRateRecord
+from fx_bharat.utils.logger import get_logger
 from fx_bharat.utils.rbi import RBI_MIN_AVAILABLE_DATE, enforce_rbi_min_date
 
 try:  # pragma: no cover - imported lazily
@@ -54,7 +55,9 @@ __all__ = [
 try:
     __version__ = importlib_metadata.version("fx-bharat")
 except importlib_metadata.PackageNotFoundError:  # pragma: no cover - fallback for local runs
-    __version__ = "0.3.0"
+    __version__ = "0.3.1"
+
+LOGGER = get_logger(__name__)
 
 
 def seed_rbi_forex(*args, **kwargs):
@@ -313,28 +316,74 @@ class FxBharat:
 
         return self.connection_info.is_sqlite
 
-    def migrate(self) -> None:
+    def migrate(
+        self,
+        from_date: date | None = None,
+        to_date: date | None = None,
+        *,
+        chunk_size: int = 1000,
+    ) -> None:
         """Migrate the bundled SQLite data into the configured external backend."""
 
         if self.connection_info.is_sqlite:
             raise ValueError("Migration only supported for external databases.")
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be a positive integer")
+        if from_date and to_date and from_date > to_date:
+            raise ValueError("from_date must be on or before to_date")
         source_backend = SQLiteBackend(DEFAULT_SQLITE_DB_PATH)
         try:
-            rows = source_backend.fetch_range()
+            rbi_rows = source_backend.fetch_range(from_date, to_date, source="RBI")
+            sbi_rows = source_backend.fetch_range(from_date, to_date, source="SBI")
+            rows = rbi_rows + sbi_rows
             lme_fetcher = getattr(source_backend, "fetch_lme_range", None)
-            lme_copper = lme_fetcher("COPPER") if callable(lme_fetcher) else []
-            lme_aluminum = lme_fetcher("ALUMINUM") if callable(lme_fetcher) else []
+            lme_copper: list[LmeRateRecord] = []
+            lme_aluminum: list[LmeRateRecord] = []
+            if callable(lme_fetcher):
+                lme_copper = cast(list[LmeRateRecord], lme_fetcher("COPPER", from_date, to_date))
+                lme_aluminum = cast(
+                    list[LmeRateRecord], lme_fetcher("ALUMINUM", from_date, to_date)
+                )
         finally:
             source_backend.close()
         target_backend = self._get_backend_strategy()
         target_backend.ensure_schema()
-        target_backend.insert_rates(rows)
-        for metal, lme_rows in {
+        total_forex = len(rows)
+        if total_forex:
+            LOGGER.info("Migrating %s forex rows in chunks of %s", total_forex, chunk_size)
+            migrated = 0
+            for start in range(0, total_forex, chunk_size):
+                chunk = rows[start : start + chunk_size]
+                result = target_backend.insert_rates(chunk)
+                migrated += result.total
+                LOGGER.info("Migrated %s/%s forex rows", migrated, total_forex)
+        lme_batches: dict[str, list[LmeRateRecord]] = {
             "COPPER": lme_copper,
             "ALUMINUM": lme_aluminum,
-        }.items():
+        }
+        for metal, lme_rows in lme_batches.items():
             if lme_rows:
-                target_backend.insert_lme_rates(metal, lme_rows)
+                total_lme = len(lme_rows)
+                LOGGER.info(
+                    "Migrating %s LME %s rows in chunks of %s", total_lme, metal, chunk_size
+                )
+                migrated = 0
+                for start in range(0, total_lme, chunk_size):
+                    lme_chunk = lme_rows[start : start + chunk_size]
+                    result = target_backend.insert_lme_rates(metal, lme_chunk)
+                    migrated += result.total
+                    LOGGER.info("Migrated %s/%s LME %s rows", migrated, total_lme, metal)
+        checkpoints: dict[str, date] = {}
+        if rbi_rows:
+            checkpoints["RBI"] = max(row.rate_date for row in rbi_rows)
+        if sbi_rows:
+            checkpoints["SBI"] = max(row.rate_date for row in sbi_rows)
+        if lme_copper:
+            checkpoints["LME_COPPER"] = max(row.rate_date for row in lme_copper)
+        if lme_aluminum:
+            checkpoints["LME_ALUMINUM"] = max(row.rate_date for row in lme_aluminum)
+        for source, checkpoint in checkpoints.items():
+            target_backend.update_ingestion_checkpoint(source, checkpoint)
 
     def seed(
         self,

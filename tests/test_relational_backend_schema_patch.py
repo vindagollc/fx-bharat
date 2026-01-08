@@ -43,21 +43,28 @@ class _DummyConnection:
 
 def test_relational_backend_schema_patch_postgres() -> None:
     backend = RelationalBackend("sqlite:///:memory:")
-    connection = _DummyConnection("postgresql", {"rate_date"})
+    connection = _DummyConnection("postgresql", {"rate_date", "usd_price"})
 
     backend._ensure_lme_schema(connection)
 
     assert any(
         "ALTER TABLE lme_copper_rates ADD COLUMN price" in sql for sql in connection.executed
     )
+    assert any(
+        "ALTER TABLE lme_copper_rates DROP COLUMN IF EXISTS usd_price" in sql
+        for sql in connection.executed
+    )
 
 
 def test_relational_backend_schema_patch_mysql() -> None:
     backend = RelationalBackend("sqlite:///:memory:")
-    connection = _DummyConnection("mysql", {"rate_date"})
+    connection = _DummyConnection("mysql", {"rate_date", "usd_price"})
 
     backend._ensure_lme_schema(connection)
 
     assert any(
         "ALTER TABLE lme_aluminum_rates ADD COLUMN price" in sql for sql in connection.executed
+    )
+    assert any(
+        "ALTER TABLE lme_aluminum_rates DROP COLUMN usd_price" in sql for sql in connection.executed
     )

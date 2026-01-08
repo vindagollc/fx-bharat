@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1] - 2025-11-23
+### Changed
+- `FxBharat.migrate()` now copies forex/LME rows in chunks and logs progress totals.
+- `FxBharat.migrate()` accepts `from_date`/`to_date` to migrate a specific window.
+- `FxBharat.migrate()` now updates `ingestion_metadata` in the target backend.
+- LME tables drop unused `usd_*`/`eur_*` columns when ensuring schema.
+- Relational backend migrations now use driver-level bulk upserts (psycopg2 execute_values / MySQL executemany).
+
 ## [0.3.0] - 2025-11-22
 ### Added
 - LME Copper and Aluminum ingestion with resilient HTML parsing.
