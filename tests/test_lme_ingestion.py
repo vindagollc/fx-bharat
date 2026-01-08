@@ -1,6 +1,6 @@
 from datetime import date
 from fx_bharat.db.sqlite_manager import SQLiteManager
-from fx_bharat.ingestion.lme import LME_URLS, parse_lme_table
+from fx_bharat.ingestion.lme import LME_URLS, fetch_lme_rates, parse_lme_table
 from fx_bharat.ingestion.models import LmeRateRecord
 
 
@@ -122,3 +122,34 @@ def test_parse_lme_table_joins_split_date_cells():
         date(2023, 12, 30),
     ]
     assert result.rows[0].price == 2516.5
+
+
+def test_fetch_lme_rates_uses_provided_session():
+    class _DummyResponse:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class _DummySession:
+        def __init__(self) -> None:
+            self.headers: dict[str, str] = {}
+            self.requested_url: str | None = None
+
+        def get(self, url: str, timeout: int) -> _DummyResponse:
+            self.requested_url = url
+            return _DummyResponse(
+                """
+                <table>
+                    <tr><th>Date</th><th>Cash</th></tr>
+                    <tr><td>01.01.2024</td><td>8,500.00</td></tr>
+                </table>
+                """
+            )
+
+    session = _DummySession()
+    result = fetch_lme_rates("COPPER", session=session)
+
+    assert session.requested_url == LME_URLS["COPPER"]
+    assert result.rows[0].price == 8500.0

@@ -81,4 +81,4 @@ history = fx.history(
 )
 
 # Print first 2 entries as a preview
-print(history[:2])
+print(history)

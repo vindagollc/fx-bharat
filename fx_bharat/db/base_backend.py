@@ -7,8 +7,7 @@ from datetime import date
 from typing import Sequence
 
 from fx_bharat.db.sqlite_manager import PersistenceResult
-from fx_bharat.ingestion.models import ForexRateRecord
-from fx_bharat.ingestion.models import LmeRateRecord
+from fx_bharat.ingestion.models import ForexRateRecord, LmeRateRecord
 
 
 class BackendStrategy(ABC):

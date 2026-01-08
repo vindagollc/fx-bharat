@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from enum import Enum
 from importlib import metadata as importlib_metadata
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Literal
+from typing import Any, Callable, Dict, Iterable, List, Literal, TYPE_CHECKING, cast
 from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 from fx_bharat.db import DEFAULT_SQLITE_DB_PATH
@@ -20,7 +20,6 @@ from fx_bharat.db.postgres_backend import PostgresBackend
 from fx_bharat.db.sqlite_backend import SQLiteBackend
 from fx_bharat.db.sqlite_manager import PersistenceResult, SQLiteManager
 from fx_bharat.ingestion.models import ForexRateRecord
-from fx_bharat.ingestion.models import LmeRateRecord
 from fx_bharat.utils.rbi import RBI_MIN_AVAILABLE_DATE, enforce_rbi_min_date
 
 try:  # pragma: no cover - imported lazily
@@ -33,6 +32,9 @@ try:  # pragma: no cover - imported lazily
     from pymongo import MongoClient
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     MongoClient = None  # type: ignore[misc, assignment]
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only import
+    from fx_bharat.seeds.populate_lme import SeedResult
 
 __all__ = [
     "__version__",
@@ -436,12 +438,15 @@ class FxBharat:
             if self.sqlite_manager is not None
             else DEFAULT_SQLITE_DB_PATH
         )
-        seed_result = seed_lme_prices(
-            metal,
-            db_path=sqlite_db_path,
-            start=from_date,
-            end=to_date,
-            dry_run=dry_run,
+        seed_result = cast(
+            "SeedResult",
+            seed_lme_prices(
+                metal,
+                db_path=sqlite_db_path,
+                start=from_date,
+                end=to_date,
+                dry_run=dry_run,
+            ),
         )
         if dry_run:
             return seed_result.rows

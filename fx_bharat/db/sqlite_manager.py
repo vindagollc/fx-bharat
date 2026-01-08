@@ -258,9 +258,35 @@ class _SQLAlchemyBackend:
             connect_args={"check_same_thread": False},
         )
         Base.metadata.create_all(self.engine)
+        self._ensure_lme_schema()
         self._SessionFactory: sessionmaker[Session] = sessionmaker(
             bind=self.engine, expire_on_commit=False, future=True
         )
+
+    def _ensure_lme_schema(self) -> None:
+        """Ensure older SQLite files include LME columns introduced later."""
+
+        def _missing_columns(table: str, expected: dict[str, str]) -> dict[str, str]:
+            with self.engine.connect() as connection:
+                result = connection.execute(text(f"PRAGMA table_info({table})"))
+                existing = {row[1] for row in result}
+            return {name: column_type for name, column_type in expected.items() if name not in existing}
+
+        lme_columns = {
+            "price": "REAL",
+            "price_3_month": "REAL",
+            "stock": "INTEGER",
+            "created_at": "TIMESTAMP",
+        }
+        for table in ("lme_copper_rates", "lme_aluminum_rates"):
+            missing = _missing_columns(table, lme_columns)
+            if not missing:
+                continue
+            with self.engine.begin() as connection:
+                for column_name, column_type in missing.items():
+                    connection.execute(
+                        text(f"ALTER TABLE {table} ADD COLUMN {column_name} {column_type}")
+                    )
 
     @staticmethod
     def _resolve_lme_model(metal: str):

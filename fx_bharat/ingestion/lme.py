@@ -5,11 +5,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date
-from typing import Iterable, Literal
+from typing import Iterable, Literal, cast
 
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+from bs4.element import Tag
 
 from fx_bharat.ingestion.models import LmeRateRecord
 from fx_bharat.utils.logger import get_logger
@@ -73,12 +74,12 @@ def _coerce_date(value: object) -> date | None:
         return None
     if pd.isna(parsed):
         return None
-    return parsed.date()
+    return cast(date, parsed.date())
 
 
-def _find_column(columns: Iterable[object], keywords: set[str]) -> object | None:
+def _find_column(columns: Iterable[str], keywords: set[str]) -> str | None:
     for column in columns:
-        lower = str(column).lower()
+        lower = column.lower()
         if any(keyword in lower for keyword in keywords):
             return column
     return None
@@ -94,50 +95,50 @@ def parse_lme_table(html: str, metal: str) -> LmeTableParseResult:
     numeric columns (cash-settlement first, otherwise any numeric column).
     """
 
-    def _cell_text(cell) -> str:
+    def _cell_text(cell: Tag) -> str:
         return " ".join(cell.stripped_strings).strip()
 
     normalised = _normalise_metal(metal)
     soup = BeautifulSoup(html, "html.parser")
 
-    tables: list[object] = []
+    tables: list[Tag] = []
     for anchor in soup.find_all("a", id=re.compile(r"^y\d{4}$")):
         table = anchor.find_next("table")
         if table:
             tables.append(table)
     if not tables:
-        tables = soup.find_all("table")
+        tables = list(soup.find_all("table"))
     if not tables:
         raise ValueError("No tables found in supplied HTML")
 
     dataframes: list[pd.DataFrame] = []
     for table in tables:
         headers = [_cell_text(th) for th in table.find_all("th") if _cell_text(th)]
-        rows: list[list[str]] = []
+        table_rows: list[list[str]] = []
         for tr in table.find_all("tr"):
             cols = tr.find_all("td")
             if not cols:
                 continue
-            rows.append([_cell_text(col) for col in cols])
-        if not rows:
+            table_rows.append([_cell_text(col) for col in cols])
+        if not table_rows:
             continue
-        if headers and len(headers) == len(rows[0]):
-            frame = pd.DataFrame(rows, columns=headers)
+        if headers and len(headers) == len(table_rows[0]):
+            frame = pd.DataFrame(table_rows, columns=headers)
         else:
-            frame = pd.DataFrame(rows)
+            frame = pd.DataFrame(table_rows)
         dataframes.append(frame)
 
     if not dataframes:
         raise ValueError("No data rows found in supplied HTML")
 
-    def _numeric_columns(frame: pd.DataFrame, *, exclude: set[object]) -> list[object]:
-        numerics: list[object] = []
+    def _numeric_columns(frame: pd.DataFrame, *, exclude: set[str]) -> list[str]:
+        numerics: list[str] = []
         for column in frame.columns:
             if column in exclude:
                 continue
             series = frame[column]
             if series.apply(_parse_float).notna().any():
-                numerics.append(column)
+                numerics.append(str(column))
         return numerics
 
     rows: list[LmeRateRecord] = []

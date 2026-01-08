@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Sequence, SupportsFloat, SupportsIndex, cast
 
 from fx_bharat.db.base_backend import BackendStrategy
 from fx_bharat.db.sqlite_manager import PersistenceResult
@@ -168,6 +168,57 @@ class RelationalBackend(BackendStrategy):
             connection.execute(text(SCHEMA_SQL_SBI))
             connection.execute(text(SCHEMA_SQL_LME_COPPER))
             connection.execute(text(SCHEMA_SQL_LME_ALUMINUM))
+            self._ensure_lme_schema(connection)
+
+    def _ensure_lme_schema(self, connection) -> None:
+        """Patch older schemas missing LME columns."""
+
+        if text is None:  # pragma: no cover - defensive guard
+            raise ModuleNotFoundError("SQLAlchemy is required for relational backends")
+        dialect = connection.engine.dialect.name
+        lme_columns = {
+            "price": "NUMERIC(18, 6)",
+            "price_3_month": "NUMERIC(18, 6)",
+            "stock": "NUMERIC(18, 6)",
+            "created_at": "TIMESTAMP",
+        }
+        for table in ("lme_copper_rates", "lme_aluminum_rates"):
+            if dialect == "postgresql":
+                result = connection.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = current_schema() AND table_name = :table"
+                    ),
+                    {"table": table},
+                )
+                existing = {row[0] for row in result}
+            elif dialect in {"mysql", "mariadb"}:
+                result = connection.execute(text("SELECT DATABASE()"))
+                schema_name = result.scalar()
+                result = connection.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = :schema AND table_name = :table"
+                    ),
+                    {"schema": schema_name, "table": table},
+                )
+                existing = {row[0] for row in result}
+            elif dialect == "sqlite":
+                result = connection.execute(text(f"PRAGMA table_info({table})"))
+                existing = {row[1] for row in result}
+            else:  # pragma: no cover - unknown dialect
+                continue
+
+            missing = [name for name in lme_columns if name not in existing]
+            if not missing:
+                continue
+            for column_name in missing:
+                connection.execute(
+                    text(
+                        f"ALTER TABLE {table} "
+                        f"ADD COLUMN {column_name} {lme_columns[column_name]}"
+                    )
+                )
 
     def insert_rates(self, rows: Sequence[ForexRateRecord]) -> PersistenceResult:
         result = PersistenceResult()
@@ -324,14 +375,13 @@ class RelationalBackend(BackendStrategy):
         with engine.connect() as connection:
             for row in connection.execute(text(query), params):
                 mapping = row._mapping
+                stock_value = casting_float(mapping.get("stock"))
                 records.append(
                     LmeRateRecord(
                         rate_date=_normalise_rate_date(mapping["rate_date"]),
                         price=casting_float(mapping.get("price")),
                         price_3_month=casting_float(mapping.get("price_3_month")),
-                        stock=int(casting_float(mapping.get("stock")))
-                        if mapping.get("stock") is not None
-                        else None,
+                        stock=int(stock_value) if stock_value is not None else None,
                         metal=normalised,
                     )
                 )
@@ -352,7 +402,9 @@ def _normalise_rate_date(value: object) -> date:
 
 def casting_float(value: object | None) -> float | None:
     try:
-        return float(value) if value is not None else None
+        if value is None:
+            return None
+        return float(cast("SupportsFloat | SupportsIndex | str | bytes | bytearray", value))
     except (TypeError, ValueError):  # pragma: no cover - defensive parsing guard
         return None
 

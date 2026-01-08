@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 import pytest
 
 from fx_bharat.db import mongo_backend as mongo_module
-from fx_bharat.ingestion.models import ForexRateRecord
+from fx_bharat.ingestion.models import ForexRateRecord, LmeRateRecord
 
 
 class _DummyCursor:
@@ -23,7 +23,7 @@ class _DummyCursor:
 
 class _DummyCollection:
     def __init__(self) -> None:
-        self.docs: Dict[tuple[str, str], Dict[str, Any]] = {}
+        self.docs: Dict[tuple[str, str] | str, Dict[str, Any]] = {}
         self.indexes: list[tuple[tuple[tuple[str, int], ...], bool]] = []
 
     def __bool__(self) -> bool:  # pragma: no cover - behavioural parity with pymongo
@@ -36,7 +36,10 @@ class _DummyCollection:
         assert ordered is False
         for op in operations:
             assert isinstance(op, _DummyUpdateOne)
-            key = (op.filter["rate_date"], op.filter["currency_code"])
+            if "currency_code" in op.filter:
+                key = (op.filter["rate_date"], op.filter["currency_code"])
+            else:
+                key = op.filter["rate_date"]
             self.docs[key] = dict(op.update["$set"])
         return _DummyBulkResult()
 
@@ -116,5 +119,29 @@ def test_mongo_backend_roundtrip(tmp_path: Path) -> None:
     assert len(fetched) == 2
     assert fetched[0].currency == "USD"
     assert fetched[1].currency == "EUR"
+
+    backend.close()
+
+
+def test_mongo_backend_lme_roundtrip() -> None:
+    backend = mongo_module.MongoBackend("mongodb://example.com/", database="fx")
+    backend.ensure_schema()
+
+    rows = [
+        LmeRateRecord(
+            rate_date=date(2024, 2, 1),
+            price=8500.0,
+            price_3_month=8450.0,
+            stock=120,
+            metal="COPPER",
+        )
+    ]
+    result = backend.insert_lme_rates("CU", rows)
+    assert result.inserted == 1
+
+    fetched = backend.fetch_lme_range("COPPER")
+    assert len(fetched) == 1
+    assert fetched[0].price == 8500.0
+    assert fetched[0].metal == "COPPER"
 
     backend.close()
