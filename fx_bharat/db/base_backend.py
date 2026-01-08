@@ -7,7 +7,7 @@ from datetime import date
 from typing import Sequence
 
 from fx_bharat.db.sqlite_manager import PersistenceResult
-from fx_bharat.ingestion.models import ForexRateRecord
+from fx_bharat.ingestion.models import ForexRateRecord, LmeRateRecord
 
 
 class BackendStrategy(ABC):
@@ -30,6 +30,18 @@ class BackendStrategy(ABC):
         source: str | None = None,
     ) -> list[ForexRateRecord]:
         """Return forex rates constrained by the provided dates."""
+
+    def insert_lme_rates(self, metal: str, rows: Sequence[LmeRateRecord]) -> PersistenceResult:
+        """Insert or update LME prices in bulk."""
+        msg = f"LME inserts not implemented for backend {type(self).__name__}"
+        raise NotImplementedError(msg)
+
+    def fetch_lme_range(
+        self, metal: str, start: date | None = None, end: date | None = None
+    ) -> list[LmeRateRecord]:
+        """Return LME prices for the selected metal."""
+        msg = f"LME fetch not implemented for backend {type(self).__name__}"
+        raise NotImplementedError(msg)
 
     def close(self) -> None:  # pragma: no cover - optional cleanup hook
         """Backends may override to release connections/resources."""

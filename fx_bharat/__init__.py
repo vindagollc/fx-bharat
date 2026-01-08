@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from enum import Enum
 from importlib import metadata as importlib_metadata
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Literal
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Literal, cast
 from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 from fx_bharat.db import DEFAULT_SQLITE_DB_PATH
@@ -19,7 +19,7 @@ from fx_bharat.db.mysql_backend import MySQLBackend
 from fx_bharat.db.postgres_backend import PostgresBackend
 from fx_bharat.db.sqlite_backend import SQLiteBackend
 from fx_bharat.db.sqlite_manager import PersistenceResult, SQLiteManager
-from fx_bharat.ingestion.models import ForexRateRecord
+from fx_bharat.ingestion.models import ForexRateRecord, LmeRateRecord
 from fx_bharat.utils.rbi import RBI_MIN_AVAILABLE_DATE, enforce_rbi_min_date
 
 try:  # pragma: no cover - imported lazily
@@ -33,6 +33,9 @@ try:  # pragma: no cover - imported lazily
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     MongoClient = None  # type: ignore[misc, assignment]
 
+if TYPE_CHECKING:  # pragma: no cover - typing-only import
+    from fx_bharat.seeds.populate_lme import SeedResult
+
 __all__ = [
     "__version__",
     "DatabaseBackend",
@@ -40,6 +43,9 @@ __all__ = [
     "FxBharat",
     "seed_rbi_forex",
     "seed_sbi_forex",
+    "seed_lme_prices",
+    "seed_lme_copper",
+    "seed_lme_aluminum",
     "SQLiteManager",
     "PersistenceResult",
     "RBISeleniumClient",
@@ -48,7 +54,7 @@ __all__ = [
 try:
     __version__ = importlib_metadata.version("fx-bharat")
 except importlib_metadata.PackageNotFoundError:  # pragma: no cover - fallback for local runs
-    __version__ = "0.2.1"
+    __version__ = "0.3.0"
 
 
 def seed_rbi_forex(*args, **kwargs):
@@ -73,6 +79,24 @@ def seed_sbi_today(*args, **kwargs):
     from fx_bharat.seeds.populate_sbi_forex import seed_sbi_today as _seed_sbi_today
 
     return _seed_sbi_today(*args, **kwargs)
+
+
+def seed_lme_prices(*args, **kwargs):
+    from fx_bharat.seeds.populate_lme import seed_lme_prices as _seed_lme_prices
+
+    return _seed_lme_prices(*args, **kwargs)
+
+
+def seed_lme_copper(*args, **kwargs):
+    from fx_bharat.seeds.populate_lme import seed_lme_copper as _seed_lme_copper
+
+    return _seed_lme_copper(*args, **kwargs)
+
+
+def seed_lme_aluminum(*args, **kwargs):
+    from fx_bharat.seeds.populate_lme import seed_lme_aluminum as _seed_lme_aluminum
+
+    return _seed_lme_aluminum(*args, **kwargs)
 
 
 class DatabaseBackend(str, Enum):
@@ -297,11 +321,20 @@ class FxBharat:
         source_backend = SQLiteBackend(DEFAULT_SQLITE_DB_PATH)
         try:
             rows = source_backend.fetch_range()
+            lme_fetcher = getattr(source_backend, "fetch_lme_range", None)
+            lme_copper = lme_fetcher("COPPER") if callable(lme_fetcher) else []
+            lme_aluminum = lme_fetcher("ALUMINUM") if callable(lme_fetcher) else []
         finally:
             source_backend.close()
         target_backend = self._get_backend_strategy()
         target_backend.ensure_schema()
         target_backend.insert_rates(rows)
+        for metal, lme_rows in {
+            "COPPER": lme_copper,
+            "ALUMINUM": lme_aluminum,
+        }.items():
+            if lme_rows:
+                target_backend.insert_lme_rates(metal, lme_rows)
 
     def seed(
         self,
@@ -390,6 +423,42 @@ class FxBharat:
             target_backend.ensure_schema()
             target_backend.insert_rates(rows)
 
+    def seed_lme(
+        self,
+        metal: Literal["COPPER", "ALUMINUM"],
+        *,
+        from_date: date | None = None,
+        to_date: date | None = None,
+        dry_run: bool = False,
+    ) -> PersistenceResult:
+        """Seed LME prices into SQLite and mirror to an external backend if configured."""
+
+        sqlite_db_path = (
+            Path(self.sqlite_manager.db_path)
+            if self.sqlite_manager is not None
+            else DEFAULT_SQLITE_DB_PATH
+        )
+        seed_result = cast(
+            "SeedResult",
+            seed_lme_prices(
+                metal,
+                db_path=sqlite_db_path,
+                start=from_date,
+                end=to_date,
+                dry_run=dry_run,
+            ),
+        )
+        if dry_run:
+            return seed_result.rows
+
+        if self.connection_info.is_external:
+            backend = self._get_backend_strategy()
+            backend.ensure_schema()
+            with SQLiteManager(sqlite_db_path) as manager:
+                lme_rows = manager.fetch_lme_range(metal, from_date, to_date)
+            backend.insert_lme_rates(metal, lme_rows)
+        return seed_result.rows
+
     def rate(
         self,
         rate_date: date | None = None,
@@ -459,6 +528,37 @@ class FxBharat:
             key=lambda snap: (0 if snap["source"] == "SBI" else 1, snap["rate_date"]),
         )
 
+    def history_lme(
+        self,
+        from_date: date,
+        to_date: date,
+        frequency: Literal["daily", "weekly", "monthly", "yearly"] = "daily",
+        *,
+        source_filter: Literal["COPPER", "ALUMINUM", None] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return LME price snapshots within ``from_date``/``to_date``."""
+
+        if from_date > to_date:
+            raise ValueError("from_date must not be after to_date")
+        freq = frequency.lower()
+        if freq not in {"daily", "weekly", "monthly", "yearly"}:
+            raise ValueError("frequency must be one of: daily, weekly, monthly, yearly")
+        snapshots: List[Dict[str, Any]] = []
+        backend = self._get_backend_strategy()
+
+        for metal in self._normalise_lme_filter(source_filter):
+            rows = backend.fetch_lme_range(metal, from_date, to_date)
+            grouped = self._group_lme_rows_by_date(rows)
+            if not grouped:
+                continue
+            sorted_dates = sorted(grouped.keys())
+            selected = self._select_snapshot_dates(sorted_dates, freq)
+            snapshots.extend(
+                [self._lme_snapshot_payload(day, grouped[day], metal) for day in selected]
+            )
+
+        return sorted(snapshots, key=lambda snap: (snap["rate_date"], snap["metal"]))
+
     def historical(
         self,
         from_date: date,
@@ -497,6 +597,15 @@ class FxBharat:
         rows: Iterable[ForexRateRecord],
     ) -> Dict[date, List[ForexRateRecord]]:
         grouped: Dict[date, List[ForexRateRecord]] = {}
+        for row in rows:
+            grouped.setdefault(row.rate_date, []).append(row)
+        return grouped
+
+    @staticmethod
+    def _group_lme_rows_by_date(
+        rows: Iterable[LmeRateRecord],
+    ) -> Dict[date, List[LmeRateRecord]]:
+        grouped: Dict[date, List[LmeRateRecord]] = {}
         for row in rows:
             grouped.setdefault(row.rate_date, []).append(row)
         return grouped
@@ -547,6 +656,19 @@ class FxBharat:
         }
 
     @staticmethod
+    def _lme_snapshot_payload(
+        rate_date: date, rates: List[LmeRateRecord], metal: str
+    ) -> Dict[str, Any]:
+        row = rates[-1]
+        return {
+            "rate_date": rate_date,
+            "metal": metal,
+            "price": row.price,
+            "price_3_month": row.price_3_month,
+            "stock": row.stock,
+        }
+
+    @staticmethod
     def _select_snapshot_dates(dates: List[date], frequency: str) -> List[date]:
         if frequency == "daily":
             return dates
@@ -582,6 +704,18 @@ class FxBharat:
         if source_filter.lower() not in {"rbi", "sbi"}:
             raise ValueError("source_filter must be one of 'rbi', 'sbi', or None")
         return (source_filter.upper(),)
+
+    @staticmethod
+    def _normalise_lme_filter(
+        source_filter: str | None = None,
+    ) -> tuple[str, ...]:
+        if source_filter is None:
+            return ("COPPER", "ALUMINUM")
+        if source_filter.lower() == "copper":
+            return ("COPPER",)
+        if source_filter.lower() in {"al", "aluminum", "aluminium"}:
+            return ("ALUMINUM",)
+        raise ValueError("source_filter must be one of 'COPPER', 'ALUMINUM', or None")
 
     def connection(self) -> tuple[bool, str | None]:
         """Attempt to establish a database connection and report the outcome."""
