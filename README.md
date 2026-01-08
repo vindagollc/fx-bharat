@@ -21,7 +21,9 @@
 Every published wheel bundles historical forex data from:
 
 > RBI archive ingested from **07/01/2020 → 07/01/2026**
-> SBI Forex PDFs ingested from **07/01/2020 → 07/01/2026**
+
+> SBI Forex PDFs ingested from **07/01/2020 → 08/01/2026**
+
 > LME (COPPER and ALUMINUM) ingested from **02/01/2008 → 07/01/2026**
 
 so the package is **immediately useful** with no setup required.
