@@ -5,15 +5,17 @@ from pathlib import Path
 
 import pytest
 
+from fx_bharat.ingestion.models import ForexRateRecord
 from fx_bharat.ingestion.rbi_csv import RBICSVExporter, RBICSVParser
 from fx_bharat.ingestion.rbi_workbook import RBIWorkbookConverter
-from fx_bharat.ingestion.models import ForexRateRecord
 
 
 def test_rbi_csv_exporter_requires_records(tmp_path: Path) -> None:
     exporter = RBICSVExporter()
     with pytest.raises(ValueError):
-        exporter.write([], start_date=date(2024, 1, 1), end_date=date(2024, 1, 31), output_dir=tmp_path)
+        exporter.write(
+            [], start_date=date(2024, 1, 1), end_date=date(2024, 1, 31), output_dir=tmp_path
+        )
 
 
 def test_rbi_csv_parser_rejects_bad_header(tmp_path: Path) -> None:
@@ -96,7 +98,7 @@ def test_rbi_csv_exporter_writes_rows(tmp_path: Path) -> None:
 
 
 def test_rbi_workbook_converter_pandas_path(tmp_path: Path) -> None:
-    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pandas")
     html_path = tmp_path / "workbook.html"
     html_path.write_text(
         """

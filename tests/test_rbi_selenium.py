@@ -37,7 +37,11 @@ class _ImmediateWebDriverWait:
 
 
 def _patch_wait(monkeypatch, driver):
-    monkeypatch.setattr(rbi_selenium, "WebDriverWait", lambda _driver, _timeout: _ImmediateWebDriverWait(driver, _timeout))
+    monkeypatch.setattr(
+        rbi_selenium,
+        "WebDriverWait",
+        lambda _driver, _timeout: _ImmediateWebDriverWait(driver, _timeout),
+    )
 
 
 def test_raise_if_no_reference_rate_detects_banner(monkeypatch):

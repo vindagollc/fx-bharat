@@ -1,4 +1,5 @@
 from datetime import date
+
 from fx_bharat.db.sqlite_manager import SQLiteManager
 from fx_bharat.ingestion.lme import LME_URLS, fetch_lme_rates, parse_lme_table
 from fx_bharat.ingestion.models import LmeRateRecord

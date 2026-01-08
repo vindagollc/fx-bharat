@@ -270,7 +270,9 @@ class _SQLAlchemyBackend:
             with self.engine.connect() as connection:
                 result = connection.execute(text(f"PRAGMA table_info({table})"))
                 existing = {row[1] for row in result}
-            return {name: column_type for name, column_type in expected.items() if name not in existing}
+            return {
+                name: column_type for name, column_type in expected.items() if name not in existing
+            }
 
         lme_columns = {
             "price": "REAL",

@@ -14,9 +14,15 @@ def test_normalise_metal_accepts_aliases() -> None:
 
 def test_filter_rows_applies_date_bounds() -> None:
     rows = [
-        LmeRateRecord(rate_date=date(2024, 1, 1), price=1.0, price_3_month=None, stock=None, metal="COPPER"),
-        LmeRateRecord(rate_date=date(2024, 1, 5), price=2.0, price_3_month=None, stock=None, metal="COPPER"),
-        LmeRateRecord(rate_date=date(2024, 1, 9), price=3.0, price_3_month=None, stock=None, metal="COPPER"),
+        LmeRateRecord(
+            rate_date=date(2024, 1, 1), price=1.0, price_3_month=None, stock=None, metal="COPPER"
+        ),
+        LmeRateRecord(
+            rate_date=date(2024, 1, 5), price=2.0, price_3_month=None, stock=None, metal="COPPER"
+        ),
+        LmeRateRecord(
+            rate_date=date(2024, 1, 9), price=3.0, price_3_month=None, stock=None, metal="COPPER"
+        ),
     ]
     filtered = _filter_rows(rows, start=date(2024, 1, 2), end=date(2024, 1, 8))
 
