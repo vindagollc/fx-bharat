@@ -337,12 +337,13 @@ class FxBharat:
             sbi_rows = source_backend.fetch_range(from_date, to_date, source="SBI")
             rows = rbi_rows + sbi_rows
             lme_fetcher = getattr(source_backend, "fetch_lme_range", None)
-            lme_copper = (
-                lme_fetcher("COPPER", from_date, to_date) if callable(lme_fetcher) else []
-            )
-            lme_aluminum = (
-                lme_fetcher("ALUMINUM", from_date, to_date) if callable(lme_fetcher) else []
-            )
+            lme_copper: list[LmeRateRecord] = []
+            lme_aluminum: list[LmeRateRecord] = []
+            if callable(lme_fetcher):
+                lme_copper = cast(list[LmeRateRecord], lme_fetcher("COPPER", from_date, to_date))
+                lme_aluminum = cast(
+                    list[LmeRateRecord], lme_fetcher("ALUMINUM", from_date, to_date)
+                )
         finally:
             source_backend.close()
         target_backend = self._get_backend_strategy()
@@ -356,10 +357,11 @@ class FxBharat:
                 result = target_backend.insert_rates(chunk)
                 migrated += result.total
                 LOGGER.info("Migrated %s/%s forex rows", migrated, total_forex)
-        for metal, lme_rows in {
+        lme_batches: dict[str, list[LmeRateRecord]] = {
             "COPPER": lme_copper,
             "ALUMINUM": lme_aluminum,
-        }.items():
+        }
+        for metal, lme_rows in lme_batches.items():
             if lme_rows:
                 total_lme = len(lme_rows)
                 LOGGER.info(
@@ -367,8 +369,8 @@ class FxBharat:
                 )
                 migrated = 0
                 for start in range(0, total_lme, chunk_size):
-                    chunk = lme_rows[start : start + chunk_size]
-                    result = target_backend.insert_lme_rates(metal, chunk)
+                    lme_chunk = lme_rows[start : start + chunk_size]
+                    result = target_backend.insert_lme_rates(metal, lme_chunk)
                     migrated += result.total
                     LOGGER.info("Migrated %s/%s LME %s rows", migrated, total_lme, metal)
         checkpoints: dict[str, date] = {}

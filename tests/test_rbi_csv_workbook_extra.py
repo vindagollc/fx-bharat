@@ -144,7 +144,7 @@ def test_rbi_workbook_converter_pandas_path(tmp_path: Path) -> None:
 
 
 def test_rbi_workbook_converter_pandas_missing_tables(monkeypatch) -> None:
-    pandas = pytest.importorskip("pandas")
+    pytest.importorskip("pandas")
 
     class _DummyPandas:
         @staticmethod

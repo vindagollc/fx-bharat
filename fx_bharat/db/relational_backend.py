@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import TYPE_CHECKING, Any, Sequence, SupportsFloat, SupportsIndex, cast
+from typing import TYPE_CHECKING, Any, Mapping, Sequence, SupportsFloat, SupportsIndex, cast
 
 from fx_bharat.db.base_backend import BackendStrategy
 from fx_bharat.db.sqlite_manager import PersistenceResult
@@ -352,7 +352,7 @@ class RelationalBackend(BackendStrategy):
             columns: Sequence[str],
             conflict: Sequence[str],
             updates: Sequence[str],
-            params_list: list[dict[str, object]],
+            params_list: Sequence[Mapping[str, object]],
         ) -> bool:
             try:  # pragma: no cover - optional dependency
                 from psycopg2.extras import execute_values
@@ -380,7 +380,7 @@ class RelationalBackend(BackendStrategy):
             table: str,
             columns: Sequence[str],
             updates: Sequence[str],
-            params_list: list[dict[str, object]],
+            params_list: Sequence[Mapping[str, object]],
         ) -> bool:
             raw = getattr(connection, "connection", None)
             if raw is None:
@@ -402,7 +402,7 @@ class RelationalBackend(BackendStrategy):
         with engine.begin() as connection:
             if rbi_rows:
                 now = datetime.utcnow()
-                rbi_params = [
+                rbi_params: list[dict[str, object]] = [
                     {
                         "rate_date": row.rate_date,
                         "currency_code": row.currency,
@@ -440,7 +440,7 @@ class RelationalBackend(BackendStrategy):
                 result.inserted += len(rbi_rows)
             if sbi_rows:
                 now = datetime.utcnow()
-                sbi_params = [
+                sbi_params: list[dict[str, object]] = [
                     {
                         "rate_date": row.rate_date,
                         "currency_code": row.currency,
@@ -512,7 +512,7 @@ class RelationalBackend(BackendStrategy):
 
         table = "lme_copper_rates" if metal.upper() in {"CU", "COPPER"} else "lme_aluminum_rates"
         upsert_sql = _build_upsert_sql(table)
-        params = [
+        params: list[dict[str, object]] = [
             {
                 "rate_date": row.rate_date,
                 "price": row.price,
@@ -522,6 +522,7 @@ class RelationalBackend(BackendStrategy):
             }
             for row in rows
         ]
+
         def _postgres_bulk_upsert(
             connection, table: str, columns: Sequence[str], updates: Sequence[str]
         ) -> bool:

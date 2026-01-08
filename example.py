@@ -1,5 +1,3 @@
-from datetime import date
-
 from fx_bharat import FxBharat
 
 # Print installed package version

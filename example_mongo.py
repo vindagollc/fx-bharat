@@ -1,5 +1,3 @@
-from datetime import date
-
 from fx_bharat import FxBharat
 
 print(FxBharat.__version__)  # 0.3.1
