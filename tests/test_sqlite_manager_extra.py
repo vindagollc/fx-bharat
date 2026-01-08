@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from fx_bharat.db.sqlite_manager import SQLiteManager
+from fx_bharat.db.sqlite_manager import SQLiteManager, _normalise_lme_metal
 from fx_bharat.ingestion.models import ForexRateRecord, LmeRateRecord
 
 
@@ -77,3 +77,7 @@ def test_sqlite_manager_invalid_lme_metal(tmp_path) -> None:
             manager.insert_lme_rates("GOLD", [])
     finally:
         manager.close()
+
+
+def test_normalise_lme_metal_falls_back() -> None:
+    assert _normalise_lme_metal("gold") == "GOLD"

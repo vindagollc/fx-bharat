@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import types
 from datetime import date, datetime
 from pathlib import Path
 
-from fx_bharat.ingestion.sbi_pdf import SBIPDFParser
+import pytest
+
+from fx_bharat.ingestion.sbi_pdf import SBIPDFDownloader, SBIPDFParser
 
 
 def test_sbi_pdf_infer_date_patterns() -> None:
@@ -46,3 +49,53 @@ def test_sbi_pdf_extract_rates_alias_and_code() -> None:
     assert rates[0].tt_buy == 1.0
     assert rates[1].currency == "USD"
     assert rates[1].tt_sell == 10.0
+
+
+def test_sbi_pdf_extract_text_from_stream(tmp_path, monkeypatch) -> None:
+    class _ExplodingReader:
+        def __init__(self, _path):
+            raise RuntimeError("boom")
+
+    dummy_module = types.SimpleNamespace(PdfReader=_ExplodingReader)
+    monkeypatch.setitem(__import__("sys").modules, "pypdf", dummy_module)
+
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_bytes(b"stream\n(USD 1 2 3 4 5 6 7 8)endstream")
+
+    parser = SBIPDFParser()
+    text = parser._extract_text(pdf_path)
+
+    assert "USD 1 2 3" in text
+
+
+def test_sbi_pdf_downloader_retry_error(monkeypatch, tmp_path) -> None:
+    downloader = SBIPDFDownloader(download_dir=tmp_path)
+
+    class _Attempt:
+        def exception(self):
+            return RuntimeError("nope")
+
+    class _RetryError(Exception):
+        def __init__(self):
+            self.last_attempt = _Attempt()
+
+    def _raise_retry(_path):
+        raise _RetryError()
+
+    monkeypatch.setattr("fx_bharat.ingestion.sbi_pdf.RetryError", _RetryError)
+    monkeypatch.setattr(downloader, "_download_with_retry", _raise_retry)
+
+    with pytest.raises(RuntimeError):
+        downloader.fetch_latest()
+
+
+def test_sbi_pdf_downloader_downloads_file(monkeypatch, tmp_path) -> None:
+    downloader = SBIPDFDownloader(download_dir=tmp_path)
+
+    def _fake_retrieve(_url, dest):
+        dest.write_bytes(b"data")
+
+    monkeypatch.setattr("fx_bharat.ingestion.sbi_pdf.urlretrieve", _fake_retrieve)
+
+    path = downloader._download_with_retry(tmp_path / "latest.pdf")
+    assert path.exists()

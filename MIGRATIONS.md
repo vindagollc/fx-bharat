@@ -4,7 +4,8 @@
 1. Install the new version: `pip install -U fx-bharat==0.3.0`.
 2. Run `fx.seed_lme("COPPER")` and `fx.seed_lme("ALUMINUM")` (or the module-level `seed_lme_copper`/`seed_lme_aluminum` helpers) once to create and populate the new LME tables inside SQLite.
 3. If you mirror to MySQL/Postgres/MongoDB, re-run `fx.migrate()` so the new `lme_copper_rates` and `lme_aluminum_rates` tables/collections are created and populated.
-4. Update any schema replicas (for example, `resources/schema.sql`) with the new LME tables if you maintain external DDL snapshots.
+4. Existing SQL schemas missing LME columns are automatically patched on `ensure_schema()` (SQLite/MySQL/Postgres). No action is required unless you maintain custom DDL snapshots.
+5. Update any schema replicas (for example, `resources/schema.sql`) with the new LME tables if you maintain external DDL snapshots.
 
 ## Upgrading from 0.1.0 to 0.2.0
 1. Install the new version: `pip install -U fx-bharat==0.2.1`.

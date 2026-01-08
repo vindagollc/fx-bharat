@@ -20,8 +20,9 @@
 
 Every published wheel bundles historical forex data from:
 
-> RBI archive ingested from **12/04/2022 → 21/11/2025**
-> SBI Forex PDFs ingested from **01/01/2020 → 21/11/2025**
+> RBI archive ingested from **07/01/2020 → 07/01/2026**
+> SBI Forex PDFs ingested from **07/01/2020 → 07/01/2026**
+> LME (COPPER and ALUMINUM) ingested from **02/01/2008 → 07/01/2026**
 
 so the package is **immediately useful** with no setup required.
 
@@ -250,6 +251,7 @@ for snapshot in history:
   * `"weekly"`
   * `"monthly"`
   * `"yearly"`
+* `.history_lme(start, end, frequency, source_filter=None)` → Returns LME snapshots for COPPER/ALUMINUM with the same frequency options
 
 ### Seeding LME Copper & Aluminum
 
@@ -262,6 +264,27 @@ fx.seed_lme("ALUMINUM")
 
 These functions populate the bundled SQLite database and mirror into any configured external backend.
 
+### LME History (Copper & Aluminum)
+
+```python
+from datetime import date
+
+# Daily snapshots for both metals
+lme_history = fx.history_lme(
+    from_date=date(2024, 1, 1),
+    to_date=date(2024, 2, 1),
+    frequency="daily",
+)
+
+# Monthly snapshots for just copper
+copper_history = fx.history_lme(
+    from_date=date(2024, 1, 1),
+    to_date=date(2024, 6, 1),
+    frequency="monthly",
+    source_filter="COPPER",
+)
+```
+
 > Legacy note: the former `.rates()` helper now lives on as a deprecated alias of `.history()`; new code should prefer `.history()` or `.historical()`.
 
 ---
@@ -270,6 +293,7 @@ These functions populate the bundled SQLite database and mirror into any configu
 
 ```python
 from datetime import date
+
 from fx_bharat import FxBharat
 
 print(FxBharat.__version__)  # 0.3.0
@@ -309,6 +333,7 @@ FxBharat now stores RBI and SBI data in **separate tables/collections**. Query h
 ## Ingestion Controls
 
 * `source_filter` on `rate`, `history`, and `rates` lets you restrict output to `"rbi"` or `"sbi"` while keeping blended ordering.
+* `source_filter` on `history_lme` accepts `"COPPER"` or `"ALUMINUM"` (case-insensitive).
 * Incremental seeding is enabled by default using the new `ingestion_metadata` table; the last ingested `rate_date` per source is detected and skipped automatically during cron-style runs.
 * Pass `dry_run=True` to `seed`, `seed_sbi_historical`, or `seed_rbi_forex` to validate connectivity without writing rows.
 * Yearly aggregations now select the most recent snapshot per calendar year for each source.
@@ -348,8 +373,9 @@ This helps diagnose DSN, credentials, port issues, or missing databases before i
 ### Example: PostgreSQL
 
 ```python
-from fx_bharat import FxBharat
 from datetime import date
+
+from fx_bharat import FxBharat
 
 fx = FxBharat(db_config='postgresql://postgres:postgres@localhost/forex')
 
@@ -389,8 +415,9 @@ fx.seed()
 ### Example: MySQL/MariaDB
 
 ```python
-from fx_bharat import FxBharat
 from datetime import date
+
+from fx_bharat import FxBharat
 
 fx = FxBharat(db_config='mysql://user:pass@localhost:3306/forex')
 
@@ -437,8 +464,9 @@ fx.seed()
 ### Example: MongoDB
 
 ```python
-from fx_bharat import FxBharat
 from datetime import date
+
+from fx_bharat import FxBharat
 
 fx = FxBharat(db_config='mongodb://127.0.0.1:27017/forex')
 
@@ -595,4 +623,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-

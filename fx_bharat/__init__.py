@@ -19,7 +19,7 @@ from fx_bharat.db.mysql_backend import MySQLBackend
 from fx_bharat.db.postgres_backend import PostgresBackend
 from fx_bharat.db.sqlite_backend import SQLiteBackend
 from fx_bharat.db.sqlite_manager import PersistenceResult, SQLiteManager
-from fx_bharat.ingestion.models import ForexRateRecord
+from fx_bharat.ingestion.models import ForexRateRecord, LmeRateRecord
 from fx_bharat.utils.rbi import RBI_MIN_AVAILABLE_DATE, enforce_rbi_min_date
 
 try:  # pragma: no cover - imported lazily
@@ -528,6 +528,37 @@ class FxBharat:
             key=lambda snap: (0 if snap["source"] == "SBI" else 1, snap["rate_date"]),
         )
 
+    def history_lme(
+        self,
+        from_date: date,
+        to_date: date,
+        frequency: Literal["daily", "weekly", "monthly", "yearly"] = "daily",
+        *,
+        source_filter: Literal["COPPER", "ALUMINUM", None] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return LME price snapshots within ``from_date``/``to_date``."""
+
+        if from_date > to_date:
+            raise ValueError("from_date must not be after to_date")
+        freq = frequency.lower()
+        if freq not in {"daily", "weekly", "monthly", "yearly"}:
+            raise ValueError("frequency must be one of: daily, weekly, monthly, yearly")
+        snapshots: List[Dict[str, Any]] = []
+        backend = self._get_backend_strategy()
+
+        for metal in self._normalise_lme_filter(source_filter):
+            rows = backend.fetch_lme_range(metal, from_date, to_date)
+            grouped = self._group_lme_rows_by_date(rows)
+            if not grouped:
+                continue
+            sorted_dates = sorted(grouped.keys())
+            selected = self._select_snapshot_dates(sorted_dates, freq)
+            snapshots.extend(
+                [self._lme_snapshot_payload(day, grouped[day], metal) for day in selected]
+            )
+
+        return sorted(snapshots, key=lambda snap: (snap["rate_date"], snap["metal"]))
+
     def historical(
         self,
         from_date: date,
@@ -566,6 +597,15 @@ class FxBharat:
         rows: Iterable[ForexRateRecord],
     ) -> Dict[date, List[ForexRateRecord]]:
         grouped: Dict[date, List[ForexRateRecord]] = {}
+        for row in rows:
+            grouped.setdefault(row.rate_date, []).append(row)
+        return grouped
+
+    @staticmethod
+    def _group_lme_rows_by_date(
+        rows: Iterable[LmeRateRecord],
+    ) -> Dict[date, List[LmeRateRecord]]:
+        grouped: Dict[date, List[LmeRateRecord]] = {}
         for row in rows:
             grouped.setdefault(row.rate_date, []).append(row)
         return grouped
@@ -616,6 +656,19 @@ class FxBharat:
         }
 
     @staticmethod
+    def _lme_snapshot_payload(
+        rate_date: date, rates: List[LmeRateRecord], metal: str
+    ) -> Dict[str, Any]:
+        row = rates[-1]
+        return {
+            "rate_date": rate_date,
+            "metal": metal,
+            "price": row.price,
+            "price_3_month": row.price_3_month,
+            "stock": row.stock,
+        }
+
+    @staticmethod
     def _select_snapshot_dates(dates: List[date], frequency: str) -> List[date]:
         if frequency == "daily":
             return dates
@@ -651,6 +704,18 @@ class FxBharat:
         if source_filter.lower() not in {"rbi", "sbi"}:
             raise ValueError("source_filter must be one of 'rbi', 'sbi', or None")
         return (source_filter.upper(),)
+
+    @staticmethod
+    def _normalise_lme_filter(
+        source_filter: str | None = None,
+    ) -> tuple[str, ...]:
+        if source_filter is None:
+            return ("COPPER", "ALUMINUM")
+        if source_filter.lower() == "copper":
+            return ("COPPER",)
+        if source_filter.lower() in {"al", "aluminum", "aluminium"}:
+            return ("ALUMINUM",)
+        raise ValueError("source_filter must be one of 'COPPER', 'ALUMINUM', or None")
 
     def connection(self) -> tuple[bool, str | None]:
         """Attempt to establish a database connection and report the outcome."""

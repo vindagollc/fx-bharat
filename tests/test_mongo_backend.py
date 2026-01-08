@@ -22,9 +22,10 @@ class _DummyCursor:
 
 
 class _DummyCollection:
-    def __init__(self) -> None:
+    def __init__(self, name: str = "") -> None:
         self.docs: Dict[tuple[str, str] | str, Dict[str, Any]] = {}
         self.indexes: list[tuple[tuple[tuple[str, int], ...], bool]] = []
+        self.name = name
 
     def __bool__(self) -> bool:  # pragma: no cover - behavioural parity with pymongo
         raise NotImplementedError("Collection truthiness is undefined")
@@ -73,7 +74,7 @@ class _DummyUpdateOne:
 class _DummyDatabase(dict):
     def __getitem__(self, name: str) -> _DummyCollection:  # type: ignore[override]
         if name not in self:
-            self[name] = _DummyCollection()
+            self[name] = _DummyCollection(name=name)
         return dict.__getitem__(self, name)
 
 
@@ -144,4 +145,41 @@ def test_mongo_backend_lme_roundtrip() -> None:
     assert fetched[0].price == 8500.0
     assert fetched[0].metal == "COPPER"
 
+    backend.close()
+
+
+def test_mongo_backend_handles_empty_inputs() -> None:
+    backend = mongo_module.MongoBackend("mongodb://example.com/", database="fx")
+    result = backend.insert_rates([])
+    assert result.total == 0
+    backend.close()
+
+
+def test_mongo_backend_fetch_range_uses_collection_name() -> None:
+    backend = mongo_module.MongoBackend("mongodb://example.com/", database="fx")
+    backend._collection = _DummyCollection(name="forex_rates_sbi")
+    backend._sbi_collection = None
+    backend._rbi_collection = None
+    backend._collection.docs[("2024-01-01", "USD")] = {
+        "rate_date": "2024-01-01",
+        "currency_code": "USD",
+        "rate": 82.5,
+    }
+
+    fetched = backend.fetch_range(source="SBI")
+    assert fetched[0].source == "SBI"
+    backend.close()
+
+
+def test_mongo_backend_fetch_lme_range_with_dates() -> None:
+    backend = mongo_module.MongoBackend("mongodb://example.com/", database="fx")
+    backend._lme_copper_collection = _DummyCollection(name="lme_copper_rates")
+    backend._lme_copper_collection.docs["2024-01-01"] = {
+        "rate_date": "2024-01-01",
+        "price": 8500.0,
+        "price_3_month": 8450.0,
+        "stock": 100,
+    }
+    rows = backend.fetch_lme_range("COPPER", start=date(2024, 1, 1), end=date(2024, 1, 1))
+    assert rows[0].price == 8500.0
     backend.close()

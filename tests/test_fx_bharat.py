@@ -8,7 +8,7 @@ import pytest
 
 from fx_bharat import DatabaseBackend, DatabaseConnectionInfo, FxBharat, __version__
 from fx_bharat.db.mongo_backend import MongoBackend
-from fx_bharat.ingestion.models import ForexRateRecord
+from fx_bharat.ingestion.models import ForexRateRecord, LmeRateRecord
 from fx_bharat.utils.rbi import RBI_MIN_AVAILABLE_DATE
 
 
@@ -214,6 +214,44 @@ def test_connection_uses_pymongo_for_mongodb(monkeypatch: pytest.MonkeyPatch) ->
 
     assert success is True
     assert error is None
+
+
+def test_history_lme_returns_snapshots(sqlite_fx: FxBharat) -> None:
+    assert sqlite_fx.sqlite_manager is not None
+    sqlite_fx.sqlite_manager.insert_lme_rates(
+        "COPPER",
+        [
+            LmeRateRecord(
+                rate_date=date(2024, 1, 1),
+                price=8500.0,
+                price_3_month=8450.0,
+                stock=100,
+                metal="COPPER",
+            )
+        ],
+    )
+    sqlite_fx.sqlite_manager.insert_lme_rates(
+        "ALUMINUM",
+        [
+            LmeRateRecord(
+                rate_date=date(2024, 1, 2),
+                price=2500.0,
+                price_3_month=2450.0,
+                stock=200,
+                metal="ALUMINUM",
+            )
+        ],
+    )
+
+    snapshots = sqlite_fx.history_lme(date(2024, 1, 1), date(2024, 1, 3))
+
+    assert {snap["metal"] for snap in snapshots} == {"COPPER", "ALUMINUM"}
+    assert {snap["rate_date"] for snap in snapshots} == {date(2024, 1, 1), date(2024, 1, 2)}
+
+
+def test_history_lme_rejects_invalid_filter(sqlite_fx: FxBharat) -> None:
+    with pytest.raises(ValueError):
+        sqlite_fx.history_lme(date(2024, 1, 1), date(2024, 1, 2), source_filter="gold")
 
 
 def test_mongodb_connection_reports_missing_driver(

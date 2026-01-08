@@ -779,6 +779,11 @@ class SQLiteManager:
             result.updated,
             result.total,
         )
+        if rows:
+            latest_day = max(row.rate_date for row in rows)
+            self._backend.update_ingestion_checkpoint(
+                f"LME_{_normalise_lme_metal(metal)}", latest_day
+            )
         return result
 
     def fetch_lme_range(
@@ -803,3 +808,12 @@ class SQLiteManager:
 
     def __exit__(self, exc_type, exc, tb) -> None:  # pragma: no cover - trivial
         self.close()
+
+
+def _normalise_lme_metal(metal: str) -> str:
+    upper = metal.upper()
+    if upper in {"CU", "COPPER"}:
+        return "COPPER"
+    if upper in {"AL", "ALUMINUM", "ALUMINIUM"}:
+        return "ALUMINUM"
+    return upper

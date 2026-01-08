@@ -2,7 +2,7 @@ from datetime import date
 
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.2.1
+print(FxBharat.__version__)  # 0.3.0
 
 # PostgresSQL Usage
 fx = FxBharat(db_config="postgresql+asyncpg://postgres:postgres@localhost/forex")
@@ -13,3 +13,7 @@ if not success:
     exit(1)
 
 fx.migrate()
+
+# Seed LME once the migration finishes.
+# fx.seed_lme("COPPER")
+# fx.seed_lme("ALUMINUM")

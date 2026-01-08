@@ -22,3 +22,8 @@ def test_mongo_backend_requires_database_name(monkeypatch) -> None:
     monkeypatch.setattr(mongo_module, "MongoClient", _NoDefaultClient)
     with pytest.raises(ValueError):
         mongo_module.MongoBackend("mongodb://example.com/")
+
+
+def test_mongo_backend_rejects_unknown_metal() -> None:
+    with pytest.raises(ValueError):
+        mongo_module.MongoBackend._normalise_metal("gold")

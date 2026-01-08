@@ -69,6 +69,9 @@ def seed_lme_prices(
     filtered_rows = _filter_rows(parse_result.rows, start=start, end=end)
     with SQLiteManager(db_path) as manager:
         result = manager.insert_lme_rates(normalised, filtered_rows)
+        if filtered_rows:
+            latest_day = max(row.rate_date for row in filtered_rows)
+            manager.update_ingestion_checkpoint(f"LME_{normalised}", latest_day)
     LOGGER.info(
         "Seeded %s LME rows (inserted=%s, updated=%s)",
         normalised,
