@@ -8,6 +8,7 @@ import pytest
 
 from fx_bharat import DatabaseBackend, DatabaseConnectionInfo, FxBharat, __version__
 from fx_bharat.db.mongo_backend import MongoBackend
+from fx_bharat.db.sqlite_manager import PersistenceResult
 from fx_bharat.ingestion.models import ForexRateRecord, LmeRateRecord
 from fx_bharat.utils.rbi import RBI_MIN_AVAILABLE_DATE
 
@@ -673,11 +674,35 @@ def test_migrate_copies_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch
             self.path = path
             self.closed = False
 
-        def fetch_range(self):  # type: ignore[no-untyped-def]
-            return [
-                ForexRateRecord(rate_date=date(2024, 1, 1), currency="USD", rate=82.5),
-                ForexRateRecord(rate_date=date(2024, 1, 2), currency="EUR", rate=89.1),
+        def fetch_range(
+            self,
+            start: date | None = None,
+            end: date | None = None,
+            *,
+            source: str | None = None,
+        ) -> list[ForexRateRecord]:
+            records = [
+                ForexRateRecord(
+                    rate_date=date(2024, 1, 1),
+                    currency="USD",
+                    rate=82.5,
+                    source="RBI",
+                ),
+                ForexRateRecord(
+                    rate_date=date(2024, 1, 2),
+                    currency="EUR",
+                    rate=89.1,
+                    source="SBI",
+                ),
             ]
+            if source is None:
+                return records
+            return [row for row in records if (row.source or "RBI").upper() == source.upper()]
+
+        def fetch_lme_range(  # type: ignore[no-untyped-def]
+            self, metal: str, start: date | None = None, end: date | None = None
+        ):
+            return []
 
         def close(self) -> None:
             self.closed = True
@@ -686,12 +711,17 @@ def test_migrate_copies_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch
         def __init__(self) -> None:
             self.rows: list[ForexRateRecord] = []
             self.ensure_called = 0
+            self.checkpoints: dict[str, date] = {}
 
         def ensure_schema(self) -> None:
             self.ensure_called += 1
 
-        def insert_rates(self, rows):  # type: ignore[no-untyped-def]
+        def insert_rates(self, rows: list[ForexRateRecord]) -> PersistenceResult:
             self.rows.extend(rows)
+            return PersistenceResult(inserted=len(rows))
+
+        def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
+            self.checkpoints[source] = rate_date
 
     monkeypatch.setattr("fx_bharat.SQLiteBackend", DummySQLiteBackend)
 
@@ -704,6 +734,8 @@ def test_migrate_copies_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch
     assert isinstance(backend, DummyExternalBackend)
     assert backend.ensure_called == 1
     assert len(backend.rows) == 2
+    assert backend.checkpoints["RBI"] == date(2024, 1, 1)
+    assert backend.checkpoints["SBI"] == date(2024, 1, 2)
 
 
 def test_select_snapshot_dates_supports_all_frequencies() -> None:

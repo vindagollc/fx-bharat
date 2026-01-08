@@ -49,6 +49,9 @@ class SQLiteBackend(BackendStrategy):
     ) -> list[LmeRateRecord]:
         return self.manager.fetch_lme_range(metal, start, end)
 
+    def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
+        self.manager.update_ingestion_checkpoint(source, rate_date)
+
     def close(self) -> None:  # pragma: no cover - trivial delegator
         self.manager.close()
 

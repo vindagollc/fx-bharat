@@ -385,7 +385,8 @@ if not success:
     exit(1)
 
 fx.migrate()
-# =>  will migrate the date from Sqlite to PostgreSQL
+# =>  will migrate the data from Sqlite to PostgreSQL (forex + LME)
+# fx.migrate(from_date=date(2024, 1, 1), to_date=date(2024, 12, 31))
 
 # Latest Forex entry
 rate = fx.rate()
@@ -427,7 +428,8 @@ if not success:
     exit(1)
 
 fx.migrate()
-# =>  will migrate the date from Sqlite to MySQL
+# =>  will migrate the data from Sqlite to MySQL (forex + LME)
+# fx.migrate(from_date=date(2024, 1, 1), to_date=date(2024, 12, 31))
 
 # Latest Forex entry
 rate = fx.rate()
@@ -476,7 +478,8 @@ if not success:
     exit(1)
     
 fx.migrate()
-# =>  will migrate the date from Sqlite to MongoDB
+# =>  will migrate the data from Sqlite to MongoDB (forex + LME)
+# fx.migrate(from_date=date(2024, 1, 1), to_date=date(2024, 12, 31))
 
 # Latest Forex entry
 rate = fx.rate()

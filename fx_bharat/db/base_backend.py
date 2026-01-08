@@ -43,6 +43,11 @@ class BackendStrategy(ABC):
         msg = f"LME fetch not implemented for backend {type(self).__name__}"
         raise NotImplementedError(msg)
 
+    def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
+        """Persist the latest ingested date for a source."""
+        msg = f"Ingestion metadata not implemented for backend {type(self).__name__}"
+        raise NotImplementedError(msg)
+
     def close(self) -> None:  # pragma: no cover - optional cleanup hook
         """Backends may override to release connections/resources."""
 
