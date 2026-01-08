@@ -1,5 +1,3 @@
-from datetime import date
-
 from fx_bharat import FxBharat
 
 # Print installed package version
@@ -20,9 +18,9 @@ fx = FxBharat()
 # -------------------------------------------------------------
 # Seed data
 # -------------------------------------------------------------
-# fx.seed()
-# fx.seed_lme(metal="ALUMINUM")
-# fx.seed_lme(metal="COPPER")
+fx.seed()
+fx.seed_lme(metal="ALUMINUM")
+fx.seed_lme(metal="COPPER")
 #
 # Use this to refresh or load new forex data from:
 #   - RBI (Reference Rate Archive, Excel files)

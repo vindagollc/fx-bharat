@@ -38,6 +38,7 @@ class MongoBackend(BackendStrategy):
         self._sbi_collection: Collection = db["forex_rates_sbi"]
         self._lme_copper_collection: Collection = db["lme_copper_rates"]
         self._lme_aluminum_collection: Collection = db["lme_aluminum_rates"]
+        self._ingestion_collection: Collection = db["ingestion_metadata"]
         self._collection: Collection | None = None
 
     @staticmethod
@@ -57,6 +58,7 @@ class MongoBackend(BackendStrategy):
             self._sbi_collection.create_index([("rate_date", 1), ("currency_code", 1)], unique=True)
             self._lme_copper_collection.create_index([("rate_date", 1)], unique=True)
             self._lme_aluminum_collection.create_index([("rate_date", 1)], unique=True)
+            self._ingestion_collection.create_index([("source", 1)], unique=True)
         except PyMongoError as exc:  # pragma: no cover - error path
             raise RuntimeError(f"Failed to ensure MongoDB schema: {exc}") from exc
 
@@ -146,6 +148,20 @@ class MongoBackend(BackendStrategy):
         except PyMongoError as exc:  # pragma: no cover - error path
             raise RuntimeError(f"Failed to insert MongoDB LME rates: {exc}") from exc
         return result
+
+    def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
+        try:
+            self._ingestion_collection.update_one(
+                {"source": source.upper()},
+                {
+                    "$set": {"updated_at": datetime.utcnow()},
+                    "$setOnInsert": {"source": source.upper()},
+                    "$max": {"last_ingested_date": rate_date.isoformat()},
+                },
+                upsert=True,
+            )
+        except PyMongoError as exc:  # pragma: no cover - error path
+            raise RuntimeError(f"Failed to update MongoDB ingestion metadata: {exc}") from exc
 
     def fetch_range(
         self,

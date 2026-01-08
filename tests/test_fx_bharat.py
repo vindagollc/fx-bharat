@@ -8,6 +8,7 @@ import pytest
 
 from fx_bharat import DatabaseBackend, DatabaseConnectionInfo, FxBharat, __version__
 from fx_bharat.db.mongo_backend import MongoBackend
+from fx_bharat.db.sqlite_manager import PersistenceResult
 from fx_bharat.ingestion.models import ForexRateRecord, LmeRateRecord
 from fx_bharat.utils.rbi import RBI_MIN_AVAILABLE_DATE
 
@@ -673,11 +674,35 @@ def test_migrate_copies_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch
             self.path = path
             self.closed = False
 
-        def fetch_range(self):  # type: ignore[no-untyped-def]
-            return [
-                ForexRateRecord(rate_date=date(2024, 1, 1), currency="USD", rate=82.5),
-                ForexRateRecord(rate_date=date(2024, 1, 2), currency="EUR", rate=89.1),
+        def fetch_range(
+            self,
+            start: date | None = None,
+            end: date | None = None,
+            *,
+            source: str | None = None,
+        ) -> list[ForexRateRecord]:
+            records = [
+                ForexRateRecord(
+                    rate_date=date(2024, 1, 1),
+                    currency="USD",
+                    rate=82.5,
+                    source="RBI",
+                ),
+                ForexRateRecord(
+                    rate_date=date(2024, 1, 2),
+                    currency="EUR",
+                    rate=89.1,
+                    source="SBI",
+                ),
             ]
+            if source is None:
+                return records
+            return [row for row in records if (row.source or "RBI").upper() == source.upper()]
+
+        def fetch_lme_range(  # type: ignore[no-untyped-def]
+            self, metal: str, start: date | None = None, end: date | None = None
+        ):
+            return []
 
         def close(self) -> None:
             self.closed = True
@@ -686,12 +711,17 @@ def test_migrate_copies_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch
         def __init__(self) -> None:
             self.rows: list[ForexRateRecord] = []
             self.ensure_called = 0
+            self.checkpoints: dict[str, date] = {}
 
         def ensure_schema(self) -> None:
             self.ensure_called += 1
 
-        def insert_rates(self, rows):  # type: ignore[no-untyped-def]
+        def insert_rates(self, rows: list[ForexRateRecord]) -> PersistenceResult:
             self.rows.extend(rows)
+            return PersistenceResult(inserted=len(rows))
+
+        def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
+            self.checkpoints[source] = rate_date
 
     monkeypatch.setattr("fx_bharat.SQLiteBackend", DummySQLiteBackend)
 
@@ -704,6 +734,97 @@ def test_migrate_copies_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch
     assert isinstance(backend, DummyExternalBackend)
     assert backend.ensure_called == 1
     assert len(backend.rows) == 2
+    assert backend.checkpoints["RBI"] == date(2024, 1, 1)
+    assert backend.checkpoints["SBI"] == date(2024, 1, 2)
+
+
+def test_migrate_respects_date_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    created_sqlite_backends: list[object] = []
+
+    class DummySQLiteBackend:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+            self.fetch_calls: list[tuple[date | None, date | None, str | None]] = []
+            self.lme_calls: list[tuple[str, date | None, date | None]] = []
+            self.closed = False
+            created_sqlite_backends.append(self)
+
+        def fetch_range(
+            self,
+            start: date | None = None,
+            end: date | None = None,
+            *,
+            source: str | None = None,
+        ) -> list[ForexRateRecord]:
+            self.fetch_calls.append((start, end, source))
+            if source is None:
+                return []
+            return [
+                ForexRateRecord(
+                    rate_date=start or date(2024, 1, 1),
+                    currency="USD",
+                    rate=80.0,
+                    source=source,
+                )
+            ]
+
+        def fetch_lme_range(
+            self, metal: str, start: date | None = None, end: date | None = None
+        ) -> list[LmeRateRecord]:
+            self.lme_calls.append((metal, start, end))
+            return [
+                LmeRateRecord(
+                    rate_date=start or date(2024, 1, 1),
+                    price=1.0,
+                    price_3_month=2.0,
+                    stock=3,
+                    metal=metal,
+                )
+            ]
+
+        def close(self) -> None:
+            self.closed = True
+
+    class DummyExternalBackend:
+        def __init__(self) -> None:
+            self.rows: list[ForexRateRecord] = []
+            self.lme_rows: list[tuple[str, list[LmeRateRecord]]] = []
+            self.checkpoints: dict[str, date] = {}
+
+        def ensure_schema(self) -> None:
+            return None
+
+        def insert_rates(self, rows: list[ForexRateRecord]) -> PersistenceResult:
+            self.rows.extend(rows)
+            return PersistenceResult(inserted=len(rows))
+
+        def insert_lme_rates(self, metal: str, rows: list[LmeRateRecord]) -> PersistenceResult:
+            self.lme_rows.append((metal, rows))
+            return PersistenceResult(inserted=len(rows))
+
+        def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
+            self.checkpoints[source] = rate_date
+
+    monkeypatch.setattr("fx_bharat.SQLiteBackend", DummySQLiteBackend)
+
+    external = FxBharat(db_config="mysql://user:pwd@localhost:3306/fx")
+    external._backend_strategy = DummyExternalBackend()
+
+    start = date(2024, 1, 1)
+    end = date(2024, 1, 31)
+    external.migrate(from_date=start, to_date=end, chunk_size=50)
+
+    backend = external._backend_strategy
+    assert isinstance(backend, DummyExternalBackend)
+    sqlite_backend = created_sqlite_backends[0]
+    assert isinstance(sqlite_backend, DummySQLiteBackend)
+    assert (start, end, "RBI") in sqlite_backend.fetch_calls
+    assert (start, end, "SBI") in sqlite_backend.fetch_calls
+    assert ("COPPER", start, end) in sqlite_backend.lme_calls
+    assert ("ALUMINUM", start, end) in sqlite_backend.lme_calls
+    assert len(backend.rows) == 2
+    assert backend.checkpoints["RBI"] == start
+    assert backend.checkpoints["SBI"] == start
 
 
 def test_select_snapshot_dates_supports_all_frequencies() -> None:

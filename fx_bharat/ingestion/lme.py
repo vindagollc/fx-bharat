@@ -8,7 +8,7 @@ from datetime import date
 from typing import Iterable, Literal, cast
 
 import pandas as pd
-import requests
+import requests  # type: ignore[import-untyped]
 from bs4 import BeautifulSoup
 from bs4.element import Tag
 

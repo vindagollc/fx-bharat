@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fx-bharat"
-version = "0.3.0"
+version = "0.3.1"
 description = "Ingestion utilities for downloading and storing RBI forex reference rates"
 readme = "README.md"
 requires-python = ">=3.10"
