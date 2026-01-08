@@ -4,7 +4,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from fx_bharat.db.relational_backend import RelationalBackend, _normalise_rate_date
-from fx_bharat.ingestion.models import ForexRateRecord
+from fx_bharat.ingestion.models import ForexRateRecord, LmeRateRecord
 
 
 def test_relational_backend_roundtrip(tmp_path: Path) -> None:
@@ -36,3 +36,28 @@ def test_normalise_rate_date_handles_multiple_input_types() -> None:
     assert _normalise_rate_date(date(2024, 5, 1)) == date(2024, 5, 1)
     assert _normalise_rate_date(datetime(2024, 5, 2, 15, 0)) == date(2024, 5, 2)
     assert _normalise_rate_date("2024-05-03") == date(2024, 5, 3)
+
+
+def test_relational_backend_lme_roundtrip(tmp_path: Path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'lme_relational.db'}"
+    backend = RelationalBackend(db_url)
+    backend.ensure_schema()
+
+    rows = [
+        LmeRateRecord(
+            rate_date=date(2024, 2, 1),
+            price=8500.0,
+            price_3_month=8450.0,
+            stock=150,
+            metal="COPPER",
+        )
+    ]
+    result = backend.insert_lme_rates("COPPER", rows)
+    assert result.total == 1
+
+    fetched = backend.fetch_lme_range("COPPER")
+    assert len(fetched) == 1
+    assert fetched[0].price == 8500.0
+    assert fetched[0].metal == "COPPER"
+
+    backend.close()

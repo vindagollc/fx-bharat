@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0] - 2025-11-22
+### Added
+- LME Copper and Aluminum ingestion with resilient HTML parsing.
+- New SQLite/relational/MongoDB tables for `lme_copper_rates` and `lme_aluminum_rates` plus migration support.
+- `seed_lme`, `seed_lme_copper`, and `seed_lme_aluminum` helpers to populate the new datasets.
+### Changed
+- `FxBharat.migrate()` now copies LME data into external backends alongside forex rates.
+
 ## [0.2.1] - 2025-11-21
 ### Added
 - Retry mechanism for ingestion

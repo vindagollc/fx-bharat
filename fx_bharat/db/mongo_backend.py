@@ -7,7 +7,7 @@ from typing import Any, Sequence
 
 from fx_bharat.db.base_backend import BackendStrategy
 from fx_bharat.db.sqlite_manager import PersistenceResult
-from fx_bharat.ingestion.models import ForexRateRecord
+from fx_bharat.ingestion.models import ForexRateRecord, LmeRateRecord
 from fx_bharat.utils.logger import get_logger
 
 try:  # pragma: no cover - optional dependency
@@ -36,7 +36,18 @@ class MongoBackend(BackendStrategy):
             raise ValueError("MongoDB connection URI must include a database name")
         self._rbi_collection: Collection = db["forex_rates_rbi"]
         self._sbi_collection: Collection = db["forex_rates_sbi"]
+        self._lme_copper_collection: Collection = db["lme_copper_rates"]
+        self._lme_aluminum_collection: Collection = db["lme_aluminum_rates"]
         self._collection: Collection | None = None
+
+    @staticmethod
+    def _normalise_metal(metal: str) -> str:
+        normalised = metal.upper()
+        if normalised in {"CU", "COPPER"}:
+            return "COPPER"
+        if normalised in {"AL", "ALUMINUM", "ALUMINIUM"}:
+            return "ALUMINUM"
+        raise ValueError(f"Unsupported LME metal: {metal}")
 
     def ensure_schema(self) -> None:
         try:
@@ -44,6 +55,8 @@ class MongoBackend(BackendStrategy):
             self._client.admin.command("ping")
             self._rbi_collection.create_index([("rate_date", 1), ("currency_code", 1)], unique=True)
             self._sbi_collection.create_index([("rate_date", 1), ("currency_code", 1)], unique=True)
+            self._lme_copper_collection.create_index([("rate_date", 1)], unique=True)
+            self._lme_aluminum_collection.create_index([("rate_date", 1)], unique=True)
         except PyMongoError as exc:  # pragma: no cover - error path
             raise RuntimeError(f"Failed to ensure MongoDB schema: {exc}") from exc
 
@@ -103,6 +116,37 @@ class MongoBackend(BackendStrategy):
             raise RuntimeError(f"Failed to insert MongoDB rates: {exc}") from exc
         return result
 
+    def insert_lme_rates(self, metal: str, rows: Sequence[LmeRateRecord]) -> PersistenceResult:
+        result = PersistenceResult()
+        if not rows:
+            return result
+        normalised = self._normalise_metal(metal)
+        target_collection = (
+            self._lme_copper_collection if normalised == "COPPER" else self._lme_aluminum_collection
+        )
+        operations: list[UpdateOne] = []
+        for row in rows:
+            doc = {
+                "rate_date": row.rate_date.isoformat(),
+                "price": row.price,
+                "price_3_month": row.price_3_month,
+                "stock": row.stock,
+                "created_at": datetime.utcnow(),
+            }
+            operations.append(
+                UpdateOne(
+                    {"rate_date": doc["rate_date"]},
+                    {"$set": doc},
+                    upsert=True,
+                )
+            )
+        try:
+            target_collection.bulk_write(operations, ordered=False)
+            result.inserted += len(rows)
+        except PyMongoError as exc:  # pragma: no cover - error path
+            raise RuntimeError(f"Failed to insert MongoDB LME rates: {exc}") from exc
+        return result
+
     def fetch_range(
         self,
         start: date | None = None,
@@ -156,6 +200,33 @@ class MongoBackend(BackendStrategy):
             if rbi_collection is not None:
                 records.extend(_collection_query(rbi_collection))
         return records
+
+    def fetch_lme_range(
+        self, metal: str, start: date | None = None, end: date | None = None
+    ) -> list[LmeRateRecord]:
+        normalised = self._normalise_metal(metal)
+        target_collection = (
+            self._lme_copper_collection if normalised == "COPPER" else self._lme_aluminum_collection
+        )
+        query: dict[str, Any] = {}
+        if start is not None or end is not None:
+            date_query: dict[str, str] = {}
+            if start is not None:
+                date_query["$gte"] = start.isoformat()
+            if end is not None:
+                date_query["$lte"] = end.isoformat()
+            query["rate_date"] = date_query
+        docs = target_collection.find(query).sort("rate_date", 1)
+        return [
+            LmeRateRecord(
+                rate_date=date.fromisoformat(doc["rate_date"]),
+                price=doc.get("price"),
+                price_3_month=doc.get("price_3_month"),
+                stock=doc.get("stock"),
+                metal=normalised,
+            )
+            for doc in docs
+        ]
 
     def close(self) -> None:  # pragma: no cover - trivial cleanup
         self._client.close()

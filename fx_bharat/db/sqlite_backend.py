@@ -9,7 +9,7 @@ from typing import Sequence
 from fx_bharat.db import DEFAULT_SQLITE_DB_PATH
 from fx_bharat.db.base_backend import BackendStrategy
 from fx_bharat.db.sqlite_manager import PersistenceResult, SQLiteManager
-from fx_bharat.ingestion.models import ForexRateRecord
+from fx_bharat.ingestion.models import ForexRateRecord, LmeRateRecord
 
 
 class SQLiteBackend(BackendStrategy):
@@ -40,6 +40,14 @@ class SQLiteBackend(BackendStrategy):
         source: str | None = None,
     ) -> list[ForexRateRecord]:
         return self.manager.fetch_range(start, end, source=source)
+
+    def insert_lme_rates(self, metal: str, rows: Sequence[LmeRateRecord]) -> PersistenceResult:
+        return self.manager.insert_lme_rates(metal, rows)
+
+    def fetch_lme_range(
+        self, metal: str, start: date | None = None, end: date | None = None
+    ) -> list[LmeRateRecord]:
+        return self.manager.fetch_lme_range(metal, start, end)
 
     def close(self) -> None:  # pragma: no cover - trivial delegator
         self.manager.close()

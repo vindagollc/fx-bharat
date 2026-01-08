@@ -20,7 +20,9 @@ fx = FxBharat()
 # -------------------------------------------------------------
 # Seed data
 # -------------------------------------------------------------
-fx.seed()
+# fx.seed()
+# fx.seed_lme(metal="ALUMINUM")
+# fx.seed_lme(metal="COPPER")
 #
 # Use this to refresh or load new forex data from:
 #   - RBI (Reference Rate Archive, Excel files)
@@ -73,12 +75,20 @@ fx.seed()
 #     print(rate.get("rates"))
 #
 # TIP: "weekly" and "monthly" are perfect for charts and analytics.
-history = fx.history(
-    from_date=date(2025, 11, 1),
-    to_date=date.today(),
-    frequency="daily",  # or: weekly / monthly / yearly
-    source_filter="rbi",  # Optional — defaults to all sources
-)
+# history = fx.history(
+#     from_date=date(2025, 11, 1),
+#     to_date=date.today(),
+#     frequency="daily",  # or: weekly / monthly / yearly
+#     # source_filter="rbi",  # Optional — defaults to all sources
+# )
+#
+# # Print first 2 entries as a preview
+# print(history[:1])
 
-# Print first 2 entries as a preview
-print(history[:2])
+# LME history (daily snapshots for both metals)
+# lme_history = fx.history_lme(
+#     from_date=date(2024, 1, 1),
+#     to_date=date.today(),
+#     frequency="daily",
+# )
+# print(lme_history[:1])
