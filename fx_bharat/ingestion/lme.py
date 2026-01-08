@@ -159,9 +159,7 @@ def parse_lme_table(html: str, metal: str) -> LmeTableParseResult:
             elif len(numeric_cols) > fallback_index:
                 three_month_col = numeric_cols[fallback_index]
         if stock_col is None and numeric_cols:
-            candidates = [
-                col for col in numeric_cols if col not in {price_col, three_month_col}
-            ]
+            candidates = [col for col in numeric_cols if col not in {price_col, three_month_col}]
             if candidates:
                 stock_col = candidates[-1]
         for _, row in frame.iterrows():
@@ -171,9 +169,7 @@ def parse_lme_table(html: str, metal: str) -> LmeTableParseResult:
             record = LmeRateRecord(
                 rate_date=rate_date,
                 price=_parse_float(row.get(price_col)) if price_col else None,
-                price_3_month=_parse_float(row.get(three_month_col))
-                if three_month_col
-                else None,
+                price_3_month=_parse_float(row.get(three_month_col)) if three_month_col else None,
                 stock=_parse_int(row.get(stock_col)) if stock_col else None,
                 metal=normalised,
             )
@@ -181,9 +177,7 @@ def parse_lme_table(html: str, metal: str) -> LmeTableParseResult:
     return LmeTableParseResult(metal=normalised, rows=rows)
 
 
-def fetch_lme_rates(
-    metal: str, *, session: requests.Session | None = None
-) -> LmeTableParseResult:
+def fetch_lme_rates(metal: str, *, session: requests.Session | None = None) -> LmeTableParseResult:
     """Download LME cash seller table and return parsed rows."""
 
     normalised = _normalise_metal(metal)

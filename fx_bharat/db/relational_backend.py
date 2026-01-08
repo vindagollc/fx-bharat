@@ -76,12 +76,10 @@ CREATE TABLE IF NOT EXISTS lme_aluminum_rates (
 """
 
 DELETE_RBI_SQL = (
-    "DELETE FROM forex_rates_rbi WHERE rate_date = :rate_date "
-    "AND currency_code = :currency_code"
+    "DELETE FROM forex_rates_rbi WHERE rate_date = :rate_date " "AND currency_code = :currency_code"
 )
 DELETE_SBI_SQL = (
-    "DELETE FROM forex_rates_sbi WHERE rate_date = :rate_date "
-    "AND currency_code = :currency_code"
+    "DELETE FROM forex_rates_sbi WHERE rate_date = :rate_date " "AND currency_code = :currency_code"
 )
 INSERT_RBI_SQL = """
 INSERT INTO forex_rates_rbi(rate_date, currency_code, rate, base_currency, created_at)
@@ -209,9 +207,7 @@ class RelationalBackend(BackendStrategy):
                 result.inserted += 1
         return result
 
-    def insert_lme_rates(
-        self, metal: str, rows: Sequence[LmeRateRecord]
-    ) -> PersistenceResult:
+    def insert_lme_rates(self, metal: str, rows: Sequence[LmeRateRecord]) -> PersistenceResult:
         result = PersistenceResult()
         if not rows:
             return result
@@ -319,9 +315,7 @@ class RelationalBackend(BackendStrategy):
             query = f"SELECT * FROM {table} ORDER BY rate_date"
             if clauses:
                 query = (
-                    f"SELECT * FROM {table} WHERE "
-                    + " AND ".join(clauses)
-                    + " ORDER BY rate_date"
+                    f"SELECT * FROM {table} WHERE " + " AND ".join(clauses) + " ORDER BY rate_date"
                 )
             return query, params
 
