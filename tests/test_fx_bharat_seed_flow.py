@@ -49,11 +49,27 @@ def test_seed_invokes_all_sources_and_lme(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert len(calls["lme"]) == 2
 
 
-def test_seed_includes_sbi_today_when_end_is_today(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+def test_seed_includes_sbi_today_when_end_is_today(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
     fx = FxBharat(db_config=f"sqlite:///{tmp_path/'flow_today.db'}")
     calls: dict[str, object] = {}
 
     monkeypatch.setattr(fx._get_backend_strategy(), "ensure_schema", lambda: None)
+
+    class _CheckpointBackend:
+        def __init__(self):
+            self.calls = 0
+
+        def ingestion_checkpoint(self, source: str):
+            self.calls += 1
+            return date(2024, 1, 1)
+
+        def ensure_schema(self):
+            return None
+
+    backend = _CheckpointBackend()
+    fx._backend_strategy = backend
 
     monkeypatch.setattr("fx_bharat.seeds.populate_rbi_forex.seed_rbi_forex", lambda *a, **k: None)
 
@@ -72,3 +88,39 @@ def test_seed_includes_sbi_today_when_end_is_today(monkeypatch: pytest.MonkeyPat
     # When start=end=today, historical ingest is skipped and only today's PDF is fetched.
     assert "hist" not in calls
     assert "today" in calls
+
+
+def test_update_daily_uses_ingestion_checkpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    fx = FxBharat(db_config="sqlite:///tmp.db")
+    today = date.today()
+    called: dict[str, object] = {}
+
+    class _BackendStub:
+        def __init__(self):
+            self.checkpoints = {
+                "RBI": today - timedelta(days=2),
+                "SBI": today - timedelta(days=3),
+                "LME_COPPER": today - timedelta(days=1),
+                "LME_ALUMINUM": None,
+            }
+
+        def ingestion_checkpoint(self, source: str):
+            return self.checkpoints.get(source)
+
+        def ensure_schema(self):
+            return None
+
+    backend = _BackendStub()
+    fx._backend_strategy = backend
+
+    def _fake_seed(self, *, from_date, to_date, **kwargs):  # type: ignore[no-untyped-def]
+        called["from_date"] = from_date
+        called["to_date"] = to_date
+        called["kwargs"] = kwargs
+
+    monkeypatch.setattr(FxBharat, "seed", _fake_seed)
+
+    fx.update_daily(source=None, include_lme=True, dry_run=True)
+
+    assert called["from_date"] == RBI_MIN_AVAILABLE_DATE
+    assert called["to_date"] == today

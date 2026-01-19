@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-import pytest
-
 from fx_bharat.db.sqlite_backend import SQLiteBackend
 from fx_bharat.ingestion.sbi_pdf import SBIPDFParser
 from fx_bharat.seeds.populate_sbi_forex import seed_sbi_historical

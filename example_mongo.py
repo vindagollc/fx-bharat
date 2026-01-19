@@ -2,7 +2,7 @@ from datetime import date
 
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.4.0
+print(FxBharat.__version__)  # 0.4.1
 
 # MongoDB Usage (requires pymongo)
 fx = FxBharat(db_config="mongodb://127.0.0.1:27017/forex")
@@ -11,7 +11,7 @@ success, error = fx.connection()
 if not success:
     raise SystemExit(error)
 
-# Seed historical RBI + SBI + LME (from 2020-01-01)
+# Seed historical RBI + SBI + LME (from 2022-04-01)
 fx.seed()
 
 # Basic reads

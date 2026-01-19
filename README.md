@@ -18,7 +18,7 @@
 
 **FxBharat** is an end-to-end Python package that automatically retrieves foreign-exchange reference rates published by the **Reserve Bank of India (RBI)**, normalizes the downloaded Excel/HTML workbooks, and stores them in your database of choice (PostgreSQL, MySQL/MariaDB, MongoDB, or SQLite when explicitly configured). SBI historical PDFs are sourced from the public GitHub archive at `sahilgupta/sbi-fx-ratekeeper`, while RBI and LME data are fetched live from their respective endpoints.
 
-> ⚠️ **Breaking change (0.4.0):** The bundled SQLite snapshot/resources have been removed. You must provide a database URL, and historical seeding now pulls SBI PDFs from the public GitHub archive while RBI/LME data are fetched live.
+> ⚠️ **Breaking change (0.4.0+):** The bundled SQLite snapshot/resources have been removed. You must provide a database URL, and historical seeding now pulls SBI PDFs from the public GitHub archive while RBI/LME data are fetched live. Daily updates now use ingestion checkpoints to backfill any missed days up to today.
 
 Historical data is ingested live from:
 
@@ -79,10 +79,9 @@ FxBharat retrieves daily *reference exchange rates* from:
 * 👉 **SBI Forex Card Rates PDF** — [https://sbi.bank.in/documents/16012/1400784/FOREX_CARD_RATES.pdf](https://sbi.bank.in/documents/16012/1400784/FOREX_CARD_RATES.pdf)
 * 👉 **LME Copper & Aluminum (Westmetall)** — [LME Copper](https://www.westmetall.com/en/markdaten.php?action=table&field=LME_Cu_cash) / [LME Aluminum](https://www.westmetall.com/en/markdaten.php?action=table&field=LME_Al_cash)
 
-Coverage today:
+Coverage:
 
-* RBI archive ingested from **12/04/2022 → 20/11/2025**
-* SBI Forex PDFs ingested from **01/01/2020 → 21/11/2025**
+* Historical seeding fetches from **01/04/2022 → today** based on what you ingest into your DB (no bundled data is shipped).
 
 Publication cadence (IST):
 
@@ -298,7 +297,7 @@ from fx_bharat import FxBharat
 
 fx = FxBharat(db_config="postgresql://user:pwd@localhost/forex")
 
-# Pull just today's RBI/SBI/LME data into your DB
+# Pull any missing RBI/SBI/LME data since the last ingested day up to today
 fx.update_daily()
 ```
 

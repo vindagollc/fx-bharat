@@ -11,15 +11,21 @@ def test_insert_lme_rates_sqlite_upsert(tmp_path) -> None:
     backend.ensure_schema()
 
     rows = [
-        LmeRateRecord(rate_date=date(2024, 1, 1), price=1.0, price_3_month=2.0, stock=3, metal="COPPER"),
-        LmeRateRecord(rate_date=date(2024, 1, 2), price=4.0, price_3_month=5.0, stock=6, metal="COPPER"),
+        LmeRateRecord(
+            rate_date=date(2024, 1, 1), price=1.0, price_3_month=2.0, stock=3, metal="COPPER"
+        ),
+        LmeRateRecord(
+            rate_date=date(2024, 1, 2), price=4.0, price_3_month=5.0, stock=6, metal="COPPER"
+        ),
     ]
     result = backend.insert_lme_rates("COPPER", rows)
     assert result.inserted == 2
 
     # Upsert should update existing row, not duplicate it.
     updated = [
-        LmeRateRecord(rate_date=date(2024, 1, 1), price=10.0, price_3_month=20.0, stock=30, metal="COPPER")
+        LmeRateRecord(
+            rate_date=date(2024, 1, 1), price=10.0, price_3_month=20.0, stock=30, metal="COPPER"
+        )
     ]
     backend.insert_lme_rates("COPPER", updated)
 
