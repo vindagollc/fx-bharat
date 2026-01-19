@@ -54,7 +54,7 @@ __all__ = [
 try:
     __version__ = importlib_metadata.version("fx-bharat")
 except importlib_metadata.PackageNotFoundError:  # pragma: no cover - fallback for local runs
-    __version__ = "0.4.0"
+    __version__ = "0.4.1"
 
 LOGGER = get_logger(__name__)
 
@@ -365,11 +365,53 @@ class FxBharat:
         include_lme: bool = True,
         dry_run: bool = False,
     ) -> None:
-        """Fetch and insert the latest available forex/LME rows into the configured backend."""
+        """Fetch and insert any missing forex/LME rows up to today."""
 
         today = date.today()
+        backend = self._get_backend_strategy()
+        targets = self._normalise_source_filter(source.lower() if source else None)
+
+        start_candidates: list[date] = []
+        if "RBI" in targets:
+            checkpoint = None
+            try:
+                checkpoint = backend.ingestion_checkpoint("RBI")
+            except NotImplementedError:
+                checkpoint = None
+            if checkpoint:
+                start_candidates.append(checkpoint + timedelta(days=1))
+            else:
+                start_candidates.append(RBI_MIN_AVAILABLE_DATE)
+        if "SBI" in targets:
+            checkpoint = None
+            try:
+                checkpoint = backend.ingestion_checkpoint("SBI")
+            except NotImplementedError:
+                checkpoint = None
+            if checkpoint:
+                start_candidates.append(checkpoint + timedelta(days=1))
+            else:
+                start_candidates.append(RBI_MIN_AVAILABLE_DATE)
+
+        if include_lme:
+            for metal_source in ("LME_COPPER", "LME_ALUMINUM"):
+                checkpoint = None
+                try:
+                    checkpoint = backend.ingestion_checkpoint(metal_source)
+                except NotImplementedError:
+                    checkpoint = None
+                if checkpoint:
+                    start_candidates.append(checkpoint + timedelta(days=1))
+                else:
+                    start_candidates.append(RBI_MIN_AVAILABLE_DATE)
+
+        start_date = min(start_candidates) if start_candidates else today
+        if start_date > today:
+            LOGGER.info("Update skipped; data already ingested up to %s", today)
+            return
+
         self.seed(
-            from_date=today,
+            from_date=start_date,
             to_date=today,
             source=source,
             include_lme=include_lme,

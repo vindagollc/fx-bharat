@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.1] - 2026-01-20
+### Added
+- `update_daily` now backfills from the last ingestion checkpoints up to today to catch missed days automatically.
+- RBI downloads reuse existing monthly CSV/Excel files; SBI archive downloads skip already-downloaded PDFs and support parallel batch fetching.
+- Broader unit-test coverage for facades, relational backends (SQLite/MySQL/Postgres), Mongo ingestion checkpoints, and seed flows.
+### Changed
+- RBI workbook converter handles already-downloaded CSVs and gracefully falls back when `pandas.read_html` finds no tables.
+- Ingestion checkpoints update `updated_at` on every write and guard against date regression across backends.
+- SBI historical seeding enforces end date < today; SBI `seed` default end aligns with RBI start at 2022-04-01.
+### Fixed
+- Outlier filtering prevents overflow on extreme/NaN numeric values during relational inserts.
+- SQLite LME schema patch rewrites tables to drop legacy `usd_*` columns.
+- Example scripts now use explicit DB URLs, 2022-04-01 start, and updated version banners.
+
 ## [0.4.0] - 2026-01-19
 ### Breaking
 - Removed bundled SQLite database/resources; a database URL is now required.
