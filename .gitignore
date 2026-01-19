@@ -208,3 +208,6 @@ __marimo__/
 rbi_downloads/
 .idea/
 resources/
+:memory:
+path.db
+tmp.db
