@@ -2,7 +2,7 @@ from datetime import date
 
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.4.0
+print(FxBharat.__version__)  # 0.4.1
 
 # PostgreSQL Usage (external DB required)
 fx = FxBharat(db_config="postgresql://postgres:postgres@localhost/forex")
@@ -11,7 +11,7 @@ success, error = fx.connection()  # => connectivity check
 if not success:
     raise SystemExit(error)
 
-# Seed historical RBI + SBI + LME (from 2020-01-01)
+# Seed historical RBI + SBI + LME (from 2022-04-01)
 fx.seed()
 
 # Fetch latest combined snapshot (SBI first, then RBI)

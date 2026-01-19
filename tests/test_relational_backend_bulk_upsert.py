@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 import types
 from datetime import date
-from typing import Mapping, Sequence
+from typing import Sequence
 
 import pytest
 
@@ -130,9 +130,15 @@ def test_sqlite_lme_schema_recreates_table_without_unwanted_columns() -> None:
 
     # Should create and swap temp tables for both LME tables
     assert any("CREATE TABLE lme_copper_rates_tmp" in sql for sql in connection.executed)
-    assert any("ALTER TABLE lme_copper_rates_tmp RENAME TO lme_copper_rates" in sql for sql in connection.executed)
+    assert any(
+        "ALTER TABLE lme_copper_rates_tmp RENAME TO lme_copper_rates" in sql
+        for sql in connection.executed
+    )
     assert any("CREATE TABLE lme_aluminum_rates_tmp" in sql for sql in connection.executed)
-    assert any("ALTER TABLE lme_aluminum_rates_tmp RENAME TO lme_aluminum_rates" in sql for sql in connection.executed)
+    assert any(
+        "ALTER TABLE lme_aluminum_rates_tmp RENAME TO lme_aluminum_rates" in sql
+        for sql in connection.executed
+    )
 
 
 def test_mysql_upsert_sql_fallback_when_no_raw_connection(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -184,8 +190,12 @@ def test_insert_rates_filters_outliers_sqlite(tmp_path) -> None:
     rows = [
         ForexRateRecord(rate_date=date(2024, 1, 1), currency="USD", rate=82.0, source="RBI"),
         ForexRateRecord(rate_date=date(2024, 1, 2), currency="USD", rate=1e13, source="RBI"),
-        ForexRateRecord(rate_date=date(2024, 1, 3), currency="USD", rate=float("nan"), source="RBI"),
-        ForexRateRecord(rate_date=date(2024, 1, 4), currency="USD", rate=90.0, source="SBI", tt_buy=1e20),
+        ForexRateRecord(
+            rate_date=date(2024, 1, 3), currency="USD", rate=float("nan"), source="RBI"
+        ),
+        ForexRateRecord(
+            rate_date=date(2024, 1, 4), currency="USD", rate=90.0, source="SBI", tt_buy=1e20
+        ),
     ]
 
     result = backend.insert_rates(rows)
@@ -212,7 +222,9 @@ def test_insert_lme_rates_postgres_fallback(monkeypatch: pytest.MonkeyPatch) -> 
             sys.modules.pop(name)
 
     rows = [
-        LmeRateRecord(rate_date=date(2024, 1, 1), price=1.0, price_3_month=2.0, stock=3, metal="COPPER")
+        LmeRateRecord(
+            rate_date=date(2024, 1, 1), price=1.0, price_3_month=2.0, stock=3, metal="COPPER"
+        )
     ]
 
     result = backend.insert_lme_rates("COPPER", rows)
@@ -227,7 +239,9 @@ def test_insert_lme_rates_mysql_fast_path(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(backend, "_get_engine", lambda: engine)
 
     rows = [
-        LmeRateRecord(rate_date=date(2024, 1, 1), price=1.0, price_3_month=2.0, stock=3, metal="ALUMINUM")
+        LmeRateRecord(
+            rate_date=date(2024, 1, 1), price=1.0, price_3_month=2.0, stock=3, metal="ALUMINUM"
+        )
     ]
 
     result = backend.insert_lme_rates("ALUMINUM", rows)

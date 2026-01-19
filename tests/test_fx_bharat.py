@@ -7,7 +7,6 @@ from datetime import date, timedelta
 import pytest
 
 from fx_bharat import DatabaseBackend, DatabaseConnectionInfo, FxBharat, __version__
-from fx_bharat.db.sqlite_backend import SQLiteBackend
 from fx_bharat.ingestion.models import ForexRateRecord
 from fx_bharat.utils.rbi import RBI_MIN_AVAILABLE_DATE
 

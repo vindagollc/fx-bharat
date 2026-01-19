@@ -177,6 +177,7 @@ def test_main_invokes_seed_with_parsed_arguments(monkeypatch: pytest.MonkeyPatch
         called["kwargs"] = kwargs
 
     monkeypatch.setattr(seeds_module, "seed_rbi_forex", _fake_seed)
+
     class _DummyFx:
         def __init__(self, db_config):  # type: ignore[no-untyped-def]
             self.db_config = db_config

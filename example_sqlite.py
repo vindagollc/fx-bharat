@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.4.0
+print(FxBharat.__version__)  # 0.4.1
 
 # SQLite usage (explicit DB file)
 db_path = Path.cwd() / "forex.db"
@@ -13,7 +13,7 @@ success, error = fx.connection()
 if not success:
     raise SystemExit(error)
 
-# Seed historical RBI + SBI + LME (from 2020-01-01)
+# Seed historical RBI + SBI + LME (from 2022-04-01)
 fx.seed()
 
 # Latest snapshot
