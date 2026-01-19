@@ -56,6 +56,7 @@ class RBIWorkbookConverter:
         directory = Path(output_dir) if output_dir else path.parent
         directory.mkdir(parents=True, exist_ok=True)
         csv_path = directory / self._build_filename(start_date, end_date)
+        source_is_output = path.resolve() == csv_path.resolve()
         with csv_path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(CSV_HEADER)
@@ -64,17 +65,25 @@ class RBIWorkbookConverter:
             should_remove = self.cleanup_source
         else:
             should_remove = remove_source
-        if should_remove:
+        if should_remove and not source_is_output:
             self._cleanup_source(path)
         return csv_path
 
     def _extract_rows(self, path: Path) -> list[list[str]]:
+        suffix = path.suffix.lower()
+        if suffix == ".csv":
+            return self._normalize_rows(self._read_csv_rows(path))
         if self.use_pandas and _pd is not None:
             try:
                 frame = self._load_dataframe(path)
             except ImportError as exc:
                 LOGGER.warning(
                     "pandas.read_html dependencies missing (%s); falling back to HTML parser",
+                    exc,
+                )
+            except ValueError as exc:
+                LOGGER.warning(
+                    "Failed to parse RBI workbook with pandas (%s); falling back to HTML parser",
                     exc,
                 )
             else:
@@ -122,6 +131,11 @@ class RBIWorkbookConverter:
         parser = _HTMLTableParser()
         parser.feed(path.read_text(encoding="utf-8", errors="ignore"))
         return parser.rows
+
+    def _read_csv_rows(self, path: Path) -> list[list[str]]:
+        with path.open(newline="", encoding="utf-8") as handle:
+            reader = csv.reader(handle)
+            return [row for row in reader if row]
 
     def _normalize_rows(self, rows: Iterable[Sequence[object]]) -> list[list[str]]:
         cleaned: list[list[str]] = []

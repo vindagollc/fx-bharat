@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from fx_bharat.db.sqlite_manager import SQLiteManager
+from fx_bharat.db.sqlite_backend import SQLiteBackend
 from fx_bharat.ingestion.lme import LmeTableParseResult
 from fx_bharat.ingestion.models import LmeRateRecord
 from fx_bharat.seeds.populate_lme import (
@@ -50,20 +50,20 @@ def test_seed_lme_prices_with_html_inserts_rows(tmp_path) -> None:
         <tr><td>02.01.2024</td><td>8,500.00</td><td>123,000</td></tr>
     </table>
     """
-    db_path = tmp_path / "lme_seed.db"
-    result = seed_lme_prices("COPPER", db_path=db_path, html=html)
+    backend = SQLiteBackend(db_path=tmp_path / "lme_seed.db")
+    result = seed_lme_prices("COPPER", backend=backend, html=html)
 
     assert result.metal == "COPPER"
     assert result.rows.total == 1
 
-    with SQLiteManager(db_path) as manager:
-        fetched = manager.fetch_lme_range("COPPER")
+    fetched = backend.fetch_lme_range("COPPER")
     assert len(fetched) == 1
     assert fetched[0].price == 8500.0
 
 
 def test_seed_lme_prices_dry_run_skips_ingestion(tmp_path) -> None:
-    result = seed_lme_prices("ALUMINUM", db_path=tmp_path / "lme_dry.db", dry_run=True)
+    backend = SQLiteBackend(db_path=tmp_path / "lme_dry.db")
+    result = seed_lme_prices("ALUMINUM", backend=backend, dry_run=True)
 
     assert result.metal == "ALUMINUM"
     assert result.rows.total == 0
@@ -82,14 +82,16 @@ def test_seed_lme_prices_uses_fetch(monkeypatch, tmp_path) -> None:
         return LmeTableParseResult(metal="COPPER", rows=[record])
 
     monkeypatch.setattr("fx_bharat.seeds.populate_lme.fetch_lme_rates", _fake_fetch)
-    result = seed_lme_prices("COPPER", db_path=tmp_path / "lme_fetch.db")
+    backend = SQLiteBackend(db_path=tmp_path / "lme_fetch.db")
+    result = seed_lme_prices("COPPER", backend=backend)
 
     assert result.rows.total == 1
 
 
 def test_seed_lme_wrappers_call_base(tmp_path) -> None:
-    copper = seed_lme_copper(db_path=tmp_path / "lme_copper.db", dry_run=True)
-    aluminum = seed_lme_aluminum(db_path=tmp_path / "lme_aluminum.db", dry_run=True)
+    backend = SQLiteBackend(db_path=tmp_path / "lme_wrappers.db")
+    copper = seed_lme_copper(backend=backend, dry_run=True)
+    aluminum = seed_lme_aluminum(backend=backend, dry_run=True)
 
     assert copper.metal == "COPPER"
     assert aluminum.metal == "ALUMINUM"

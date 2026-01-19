@@ -163,6 +163,19 @@ class MongoBackend(BackendStrategy):
         except PyMongoError as exc:  # pragma: no cover - error path
             raise RuntimeError(f"Failed to update MongoDB ingestion metadata: {exc}") from exc
 
+    def ingestion_checkpoint(self, source: str) -> date | None:
+        doc = self._ingestion_collection.find_one({"source": source.upper()})
+        if not doc:
+            return None
+        value = doc.get("last_ingested_date")
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return date.fromisoformat(value)
+        if isinstance(value, datetime):
+            return value.date()
+        return None
+
     def fetch_range(
         self,
         start: date | None = None,

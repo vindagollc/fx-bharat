@@ -1,18 +1,26 @@
+from datetime import date
+
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.3.1
+print(FxBharat.__version__)  # 0.4.0
 
-# MongoDB Usage
+# MongoDB Usage (requires pymongo)
 fx = FxBharat(db_config="mongodb://127.0.0.1:27017/forex")
 
-success, error = fx.connection()  # => to check the connectivity
+success, error = fx.connection()
 if not success:
-    print(error)
-    exit(1)
+    raise SystemExit(error)
 
-fx.migrate()
-# fx.migrate(from_date=date(2024, 1, 1), to_date=date(2024, 12, 31))
+# Seed historical RBI + SBI + LME (from 2020-01-01)
+fx.seed()
 
-# Seed LME once the migration finishes.
-# fx.seed_lme("COPPER")
-# fx.seed_lme("ALUMINUM")
+# Basic reads
+print("Latest snapshot:", fx.rate())
+print("SBI-only snapshot:", fx.rate(source_filter="sbi"))
+
+# Historical window
+history = fx.history(date(2024, 1, 1), date(2024, 1, 7))
+print("History rows:", len(history))
+
+# LME daily refresh for today
+fx.update_daily()

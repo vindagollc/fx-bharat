@@ -6,8 +6,8 @@ import argparse
 from datetime import timedelta
 from pathlib import Path
 
-from fx_bharat.db import DEFAULT_SQLITE_DB_PATH
-from fx_bharat.db.sqlite_manager import PersistenceResult, SQLiteManager
+from fx_bharat.db.base_backend import BackendStrategy
+from fx_bharat.db.sqlite_manager import PersistenceResult
 from fx_bharat.ingestion.rbi_csv import RBICSVParser
 from fx_bharat.ingestion.rbi_selenium import RBINoReferenceRateError, RBISeleniumClient
 from fx_bharat.ingestion.rbi_workbook import RBIWorkbookConverter
@@ -24,12 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--from", dest="start", required=True, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--to", dest="end", required=True, help="End date (YYYY-MM-DD)")
-    parser.add_argument(
-        "--db",
-        dest="db_path",
-        default=str(DEFAULT_SQLITE_DB_PATH),
-        help="SQLite database path",
-    )
+    parser.add_argument("--db-url", dest="db_url", required=True, help="Database URL/DSN")
     parser.add_argument(
         "--no-headless",
         dest="headless",
@@ -55,13 +50,13 @@ def seed_rbi_forex(
     start: str,
     end: str,
     *,
-    db_path: str | Path = DEFAULT_SQLITE_DB_PATH,
+    backend: BackendStrategy,
     headless: bool = True,
     download_dir: str | Path | None = None,
     incremental: bool = True,
     dry_run: bool = False,
 ) -> PersistenceResult:
-    """Seed RBI forex data between ``start`` and ``end`` dates."""
+    """Seed RBI forex data between ``start`` and ``end`` dates directly into the backend."""
 
     start_date = parse_date(start)
     end_date = parse_date(end)
@@ -73,43 +68,47 @@ def seed_rbi_forex(
     csv_parser = RBICSVParser()
     download_path = Path(download_dir) if download_dir else None
     total = PersistenceResult()
-    with SQLiteManager(db_path) as manager:
-        effective_start = start_date
-        if incremental:
-            checkpoint = manager.ingestion_checkpoint("RBI") or manager.latest_rate_date("RBI")
-            if checkpoint and checkpoint >= start_date:
-                effective_start = checkpoint + timedelta(days=1)
-        if effective_start > end_date:
-            LOGGER.info("RBI data already ingested up to %s; nothing to do", end_date)
-            return total
-        date_chunks = list(month_ranges(effective_start, end_date))
-        with RBISeleniumClient(download_dir=download_path, headless=headless) as client:
-            for chunk in date_chunks:
-                LOGGER.info("Processing %s - %s", chunk.start, chunk.end)
-                try:
-                    excel_path = client.fetch_excel(chunk.start, chunk.end)
-                except RBINoReferenceRateError as exc:
-                    LOGGER.warning(
-                        "RBI reference rates for %s → %s are not yet published; stopping ingestion early (%s)",
-                        chunk.start,
-                        chunk.end,
-                        exc,
-                    )
-                    break
-                csv_path = converter.to_csv(
-                    excel_path,
-                    start_date=chunk.start,
-                    end_date=chunk.end,
-                    output_dir=client.download_dir,
+    effective_start = start_date
+    if incremental:
+        try:
+            checkpoint = backend.ingestion_checkpoint("RBI")
+        except NotImplementedError:
+            checkpoint = None
+        if checkpoint and checkpoint >= start_date:
+            effective_start = checkpoint + timedelta(days=1)
+    if effective_start > end_date:
+        LOGGER.info("RBI data already ingested up to %s; nothing to do", end_date)
+        return total
+    date_chunks = list(month_ranges(effective_start, end_date))
+    with RBISeleniumClient(download_dir=download_path, headless=headless) as client:
+        for chunk in date_chunks:
+            LOGGER.info("Processing %s - %s", chunk.start, chunk.end)
+            try:
+                excel_path = client.fetch_excel(chunk.start, chunk.end)
+            except RBINoReferenceRateError as exc:
+                LOGGER.warning(
+                    "RBI reference rates for %s → %s are not yet published; stopping ingestion early (%s)",
+                    chunk.start,
+                    chunk.end,
+                    exc,
                 )
-                csv_rows = csv_parser.parse(csv_path)
-                result = manager.insert_rates(csv_rows)
-                _log_chunk_result(f"Chunk {chunk.start} → {chunk.end}", result)
-                total.inserted += result.inserted
-                total.updated += result.updated
-                if result.inserted:
-                    latest_day = max(row.rate_date for row in csv_rows)
-                    manager.update_ingestion_checkpoint("RBI", latest_day)
+                break
+            csv_path = converter.to_csv(
+                excel_path,
+                start_date=chunk.start,
+                end_date=chunk.end,
+                output_dir=client.download_dir,
+            )
+            csv_rows = csv_parser.parse(csv_path)
+            result = backend.insert_rates(csv_rows)
+            _log_chunk_result(f"Chunk {chunk.start} → {chunk.end}", result)
+            total.inserted += result.inserted
+            total.updated += result.updated
+            if csv_rows:
+                latest_day = max(row.rate_date for row in csv_rows)
+                update_func = getattr(backend, "update_ingestion_checkpoint", None)
+                if callable(update_func):
+                    update_func("RBI", latest_day)
     LOGGER.info(
         "Seeding finished: inserted %s rows, updated %s rows (total %s)",
         total.inserted,
@@ -121,10 +120,14 @@ def seed_rbi_forex(
 
 def main() -> None:
     args = parse_args()
+    from fx_bharat import FxBharat
+
+    client = FxBharat(db_config=args.db_url)
+    backend = client._get_backend_strategy()
     seed_rbi_forex(
         args.start,
         args.end,
-        db_path=args.db_path,
+        backend=backend,
         headless=args.headless,
         download_dir=args.download_dir,
     )

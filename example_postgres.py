@@ -2,19 +2,27 @@ from datetime import date
 
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.3.1
+print(FxBharat.__version__)  # 0.4.0
 
-# PostgresSQL Usage
-fx = FxBharat(db_config="postgresql+asyncpg://postgres:postgres@localhost/forex")
+# PostgreSQL Usage (external DB required)
+fx = FxBharat(db_config="postgresql://postgres:postgres@localhost/forex")
 
-success, error = fx.connection()  # => to check the connectivity
+success, error = fx.connection()  # => connectivity check
 if not success:
-    print(error)
-    exit(1)
+    raise SystemExit(error)
 
-fx.migrate()
-fx.migrate(from_date=date(2024, 1, 1), to_date=date(2024, 12, 31), chunk_size=500)
+# Seed historical RBI + SBI + LME (from 2020-01-01)
+fx.seed()
 
-# Seed LME once the migration finishes.
-# fx.seed_lme("COPPER")
-# fx.seed_lme("ALUMINUM")
+# Fetch latest combined snapshot (SBI first, then RBI)
+print("Latest snapshot:", fx.rate())
+
+# Fetch a specific day
+print("2024-12-31 snapshot:", fx.rate(rate_date=date(2024, 12, 31)))
+
+# LME history example
+lme = fx.history_lme(date(2024, 1, 1), date(2024, 1, 31))
+print("LME Jan 2024 rows:", len(lme))
+
+# Optional: explicit daily refresh (today only)
+# fx.update_daily()

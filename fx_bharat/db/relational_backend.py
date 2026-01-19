@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, Mapping, Sequence, SupportsFloat, SupportsIndex, cast
 
@@ -346,6 +347,32 @@ class RelationalBackend(BackendStrategy):
             else:
                 rbi_rows.append(row)
 
+        def _is_out_of_range(value: object) -> bool:
+            if value is None:
+                return False
+            try:
+                numeric = float(value)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return True
+            return (not math.isfinite(numeric)) or abs(numeric) >= 1_000_000_000_000
+
+        def _is_row_outlier(row: ForexRateRecord) -> bool:
+            numerics = [
+                row.rate,
+                row.tt_buy,
+                row.tt_sell,
+                row.bill_buy,
+                row.bill_sell,
+                row.travel_card_buy,
+                row.travel_card_sell,
+                row.cn_buy,
+                row.cn_sell,
+            ]
+            return any(_is_out_of_range(value) for value in numerics)
+
+        rbi_rows = [row for row in rbi_rows if not _is_row_outlier(row)]
+        sbi_rows = [row for row in sbi_rows if not _is_row_outlier(row)]
+
         def _postgres_bulk_upsert(
             connection,
             table: str,
@@ -594,8 +621,11 @@ class RelationalBackend(BackendStrategy):
                         INSERT INTO ingestion_metadata(source, last_ingested_date)
                         VALUES(:source, :last_ingested_date)
                         ON CONFLICT(source) DO UPDATE
-                        SET last_ingested_date = EXCLUDED.last_ingested_date
-                        WHERE EXCLUDED.last_ingested_date > ingestion_metadata.last_ingested_date
+                        SET last_ingested_date = GREATEST(
+                                ingestion_metadata.last_ingested_date,
+                                EXCLUDED.last_ingested_date
+                            ),
+                            updated_at = CURRENT_TIMESTAMP
                         """
                     ),
                     params,
@@ -611,7 +641,8 @@ class RelationalBackend(BackendStrategy):
                             VALUES(last_ingested_date) > last_ingested_date,
                             VALUES(last_ingested_date),
                             last_ingested_date
-                        )
+                        ),
+                        updated_at = CURRENT_TIMESTAMP
                         """
                     ),
                     params,
@@ -623,12 +654,39 @@ class RelationalBackend(BackendStrategy):
                         INSERT INTO ingestion_metadata(source, last_ingested_date)
                         VALUES(:source, :last_ingested_date)
                         ON CONFLICT(source) DO UPDATE
-                        SET last_ingested_date = excluded.last_ingested_date
-                        WHERE excluded.last_ingested_date > ingestion_metadata.last_ingested_date
+                        SET last_ingested_date = CASE
+                                WHEN excluded.last_ingested_date > ingestion_metadata.last_ingested_date
+                                    THEN excluded.last_ingested_date
+                                ELSE ingestion_metadata.last_ingested_date
+                            END,
+                            updated_at = CURRENT_TIMESTAMP
                         """
                     ),
                     params,
                 )
+
+    def ingestion_checkpoint(self, source: str) -> date | None:
+        engine = self._get_engine()
+        if text is None:  # pragma: no cover - defensive guard
+            raise ModuleNotFoundError("SQLAlchemy is required for relational backends")
+        with engine.begin() as connection:
+            result = connection.execute(
+                text(
+                    "SELECT last_ingested_date FROM ingestion_metadata WHERE source = :source LIMIT 1"
+                ),
+                {"source": source.upper()},
+            )
+            value = result.scalar()
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                return value.date()
+            if isinstance(value, date):
+                return value
+            try:
+                return date.fromisoformat(str(value))
+            except Exception:
+                return None
 
     def fetch_range(
         self,

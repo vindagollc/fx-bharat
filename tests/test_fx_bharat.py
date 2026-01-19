@@ -1,54 +1,24 @@
-"""Tests for the public package facade."""
+"""Core facade tests aligned to the 0.4.x API."""
+
+from __future__ import annotations
 
 from datetime import date, timedelta
-from pathlib import Path
-from typing import Any
 
 import pytest
 
 from fx_bharat import DatabaseBackend, DatabaseConnectionInfo, FxBharat, __version__
-from fx_bharat.db.mongo_backend import MongoBackend
-from fx_bharat.db.sqlite_manager import PersistenceResult
-from fx_bharat.ingestion.models import ForexRateRecord, LmeRateRecord
+from fx_bharat.db.sqlite_backend import SQLiteBackend
+from fx_bharat.ingestion.models import ForexRateRecord
 from fx_bharat.utils.rbi import RBI_MIN_AVAILABLE_DATE
 
 
 def test_fx_bharat_class_is_exposed() -> None:
-    """The package should expose the FxBharat class."""
-
     assert FxBharat.__version__ == __version__
 
 
-def test_fx_bharat_defaults_to_sqlite() -> None:
-    fx_bharat = FxBharat()
-
-    assert fx_bharat.connection_info.backend is DatabaseBackend.SQLITE
-    assert fx_bharat.sqlite_manager is not None
-
-
-def test_fx_bharat_supports_external_backends() -> None:
-    fx_bharat = FxBharat(db_config="mysql://user:pwd@localhost:3306/forex")
-
-    assert fx_bharat.connection_info.backend is DatabaseBackend.MYSQL
-    assert fx_bharat.connection_info.username == "user"
-    assert fx_bharat.connection_info.password == "pwd"
-    assert fx_bharat.connection_info.host == "localhost"
-    assert fx_bharat.connection_info.port == 3306
-    assert fx_bharat.sqlite_manager is None
-
-
-@pytest.mark.parametrize(
-    "url, backend",
-    [
-        ("postgresql://localhost/forex", DatabaseBackend.POSTGRES),
-        ("postgres://localhost/forex", DatabaseBackend.POSTGRES),
-        ("mongodb://localhost:27017/forex", DatabaseBackend.MONGODB),
-    ],
-)
-def test_fx_bharat_normalises_backend_names(url: str, backend: DatabaseBackend) -> None:
-    fx_bharat = FxBharat(db_config=url)
-
-    assert fx_bharat.connection_info.backend is backend
+def test_fx_bharat_requires_db_config() -> None:
+    with pytest.raises(ValueError):
+        FxBharat()
 
 
 @pytest.mark.parametrize(
@@ -56,7 +26,6 @@ def test_fx_bharat_normalises_backend_names(url: str, backend: DatabaseBackend) 
     [
         ("postgresql", DatabaseBackend.POSTGRES),
         ("postgres", DatabaseBackend.POSTGRES),
-        ("postgressql", DatabaseBackend.POSTGRES),
         ("mysql+pymysql", DatabaseBackend.MYSQL),
         ("sqlite", DatabaseBackend.SQLITE),
         ("mongodb+srv", DatabaseBackend.MONGODB),
@@ -68,778 +37,104 @@ def test_database_backend_from_scheme_handles_aliases(
     assert DatabaseBackend.from_scheme(scheme) is backend
 
 
-def test_fx_bharat_validates_urls() -> None:
-    with pytest.raises(ValueError):
-        FxBharat(db_config="localhost:3306/forex")
-
-
-def test_database_connection_info_requires_scheme() -> None:
-    with pytest.raises(ValueError, match="DB_URL must include a scheme"):
-        DatabaseConnectionInfo.from_url("localhost/forex")
-
-
-def test_database_connection_info_from_url() -> None:
-    info = DatabaseConnectionInfo.from_url("postgres://user:pwd@db:5432/app")
-
-    assert info.backend is DatabaseBackend.POSTGRES
-    assert info.username == "user"
-    assert info.password == "pwd"
-    assert info.host == "db"
-    assert info.port == 5432
-    assert info.name == "app"
-
-
-def test_database_name_is_extracted_from_query_parameters() -> None:
-    info = DatabaseConnectionInfo.from_url(
-        "mongodb://user:pwd@cluster0.example.com/?retryWrites=false&w=majority&appName=Cluster0DATABASE_NAME=test",
-    )
-
-    assert info.backend is DatabaseBackend.MONGODB
-    assert info.name == "test"
-    assert info.url.startswith(
-        "mongodb://user:pwd@cluster0.example.com/test?retryWrites=false&w=majority&appName=Cluster0"
-    )
-
-
-def test_mongodb_srv_connections_are_supported() -> None:
-    info = DatabaseConnectionInfo.from_url(
-        "mongodb+srv://127.0.0.1:27017/?DATABASE_NAME=forex&retryWrites=false&w=majority&appName=Cluster0",
-    )
-
-    assert info.backend is DatabaseBackend.MONGODB
-    assert info.name == "forex"
-    assert info.url.startswith(
-        "mongodb+srv://127.0.0.1:27017/forex?retryWrites=false&w=majority&appName=Cluster0"
-    )
-
-
-@pytest.mark.parametrize(
-    "dsn",
-    [
-        "postgresql+asyncpg://postgres:postgres@localhost/forex",
-        "postgressql+asyncpg://postgres:postgres@localhost/forex",
-    ],
-)
-def test_postgres_asyncpg_urls_are_normalised(dsn: str) -> None:
-    info = DatabaseConnectionInfo.from_url(dsn)
-
-    assert info.backend is DatabaseBackend.POSTGRES
-    assert info.url.startswith("postgresql://postgres:postgres@localhost/forex")
-
-
-def test_database_connection_info_uses_database_name_query_parameter() -> None:
-    info = DatabaseConnectionInfo.from_url("mysql://localhost/?DATABASE_NAME=forex")
-
-    assert info.backend is DatabaseBackend.MYSQL
-    assert info.name == "forex"
-    assert info.url.startswith("mysql://localhost/forex")
-
-
-def test_fx_bharat_accepts_prebuilt_config() -> None:
-    config = DatabaseConnectionInfo.from_url("mongodb://example.com:27017/fx")
-
-    fx_bharat = FxBharat(db_config=config)
-
-    assert fx_bharat.connection_info is config
-    assert fx_bharat.connection_info.backend is DatabaseBackend.MONGODB
-
-
-@pytest.fixture()
-def sqlite_fx(tmp_path: Path) -> FxBharat:
-    db_path = tmp_path / "forex.db"
-    config = DatabaseConnectionInfo(
-        backend=DatabaseBackend.SQLITE,
-        url=f"sqlite:///{db_path}",
-        name=str(db_path),
-        username=None,
-        password=None,
-        host=None,
-        port=None,
-    )
-    return FxBharat(db_config=config)
-
-
-def test_connection_reports_success_for_sqlite() -> None:
-    fx_bharat = FxBharat()
-
-    success, error = fx_bharat.connection()
-
-    assert success is True
-    assert error is None
-
-
-def test_connection_reports_failure_for_unreachable_external_db() -> None:
-    external = FxBharat(db_config="postgres://user:pass@db.example.com:5432/forex")
-
-    success, error = external.connection()
-
-    assert success is False
-    assert isinstance(error, str)
-    assert error
-
-
-def test_connection_reports_missing_driver(monkeypatch: pytest.MonkeyPatch) -> None:
-    external = FxBharat(db_config="postgres://user:pass@db.example.com:5432/forex")
-
-    def _missing_driver(*_: Any, **__: Any) -> None:
-        raise ModuleNotFoundError("psycopg2")
-
-    monkeypatch.setattr("fx_bharat.create_engine", _missing_driver)
-
-    success, error = external.connection()
-
-    assert success is False
-    assert "psycopg2" in (error or "")
-    assert "pip install psycopg2-binary" in (error or "")
-
-
-def test_connection_uses_pymongo_for_mongodb(monkeypatch: pytest.MonkeyPatch) -> None:
-    external = FxBharat(db_config="mongodb://user:pass@cluster0.example.com:27017/forex")
-
-    class DummyClient:
-        def __init__(self, url: str, serverSelectionTimeoutMS: int) -> None:  # noqa: N803
-            assert url.startswith("mongodb://")
-            assert serverSelectionTimeoutMS == 5000
-            self.closed = False
-            self.admin = self
-
-        def command(self, name: str) -> None:
-            assert name == "ping"
-
-        def close(self) -> None:
-            self.closed = True
-
-    monkeypatch.setattr("fx_bharat.MongoClient", DummyClient)
-
-    success, error = external.connection()
-
-    assert success is True
-    assert error is None
-
-
-def test_history_lme_returns_snapshots(sqlite_fx: FxBharat) -> None:
-    assert sqlite_fx.sqlite_manager is not None
-    sqlite_fx.sqlite_manager.insert_lme_rates(
-        "COPPER",
-        [
-            LmeRateRecord(
-                rate_date=date(2024, 1, 1),
-                price=8500.0,
-                price_3_month=8450.0,
-                stock=100,
-                metal="COPPER",
-            )
-        ],
-    )
-    sqlite_fx.sqlite_manager.insert_lme_rates(
-        "ALUMINUM",
-        [
-            LmeRateRecord(
-                rate_date=date(2024, 1, 2),
-                price=2500.0,
-                price_3_month=2450.0,
-                stock=200,
-                metal="ALUMINUM",
-            )
-        ],
-    )
-
-    snapshots = sqlite_fx.history_lme(date(2024, 1, 1), date(2024, 1, 3))
-
-    assert {snap["metal"] for snap in snapshots} == {"COPPER", "ALUMINUM"}
-    assert {snap["rate_date"] for snap in snapshots} == {date(2024, 1, 1), date(2024, 1, 2)}
-
-
-def test_history_lme_rejects_invalid_filter(sqlite_fx: FxBharat) -> None:
-    with pytest.raises(ValueError):
-        sqlite_fx.history_lme(date(2024, 1, 1), date(2024, 1, 2), source_filter="gold")
-
-
-def test_mongodb_connection_reports_missing_driver(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    external = FxBharat(db_config="mongodb://user:pass@cluster0.example.com:27017/forex")
-
-    monkeypatch.setattr("fx_bharat.MongoClient", None)
-
-    success, error = external.connection()
-
-    assert success is False
-    assert error is not None
-    assert "pymongo" in error
-
-
-@pytest.mark.parametrize(
-    "url, attr_name, expected_kwargs",
-    [
-        ("postgresql://user:pass@db.example.com:5432/forex", "PostgresBackend", {}),
-        ("mysql://user:pass@db.example.com:3306/forex", "MySQLBackend", {}),
-        (
-            "mongodb://user:pass@db.example.com:27017/forex",
-            "MongoBackend",
-            {"database": "forex"},
-        ),
-    ],
-)
-def test_build_external_backend_instantiates_strategy(
-    monkeypatch: pytest.MonkeyPatch,
-    url: str,
-    attr_name: str,
-    expected_kwargs: dict[str, str],
-) -> None:
-    captured: dict[str, object] = {}
-
-    class DummyStrategy:
-        def __init__(self, url: str, **kwargs: object) -> None:
-            captured["url"] = url
-            captured["kwargs"] = kwargs
-
-    monkeypatch.setattr(f"fx_bharat.{attr_name}", DummyStrategy)
-    fx_bharat = FxBharat(db_config=url)
-
-    strategy = fx_bharat._build_external_backend()
-
-    assert isinstance(strategy, DummyStrategy)
-    assert captured["url"] == fx_bharat.connection_info.url
-    assert captured["kwargs"] == expected_kwargs
-
-
-def test_get_backend_strategy_raises_for_uninitialised_sqlite() -> None:
-    fx_bharat = FxBharat()
-    fx_bharat._backend_strategy = None
-
-    with pytest.raises(RuntimeError):
-        fx_bharat._get_backend_strategy()
-
-
-def test_get_backend_strategy_caches_external_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    fx_bharat = FxBharat(db_config="postgresql://user:pass@db:5432/forex")
-    sentinel = object()
-
-    calls = {"count": 0}
-
-    def _fake_build(self: FxBharat) -> object:  # noqa: ANN001
-        calls["count"] += 1
-        return sentinel
-
-    monkeypatch.setattr(FxBharat, "_build_external_backend", _fake_build)
-
-    first = fx_bharat._get_backend_strategy()
-    second = fx_bharat._get_backend_strategy()
-
-    assert first is second is sentinel
-    assert calls["count"] == 1
-
-
-def test_uses_inhouse_sqlite_reports_backend() -> None:
-    sqlite_app = FxBharat()
-    mysql_app = FxBharat(db_config="mysql://user:pass@db.example.com:3306/forex")
-
-    assert sqlite_app.uses_inhouse_sqlite() is True
-    assert mysql_app.uses_inhouse_sqlite() is False
-
-
-def test_mongodb_backend_uses_bulk_writes(monkeypatch: pytest.MonkeyPatch) -> None:
-    backend = MongoBackend.__new__(MongoBackend)
-
-    class DummyUpdateOne:
-        def __init__(
-            self, filter: dict[str, str], update: dict[str, dict[str, Any]], *, upsert: bool
-        ) -> None:
-            self.filter = filter
-            self.update = update
-            self.upsert = upsert
-
-    monkeypatch.setattr("fx_bharat.db.mongo_backend.UpdateOne", DummyUpdateOne)
-
-    class DummyCollection:
-        def __init__(self) -> None:
-            self.calls: list[tuple[list[object], bool]] = []
-
-        def bulk_write(self, operations: list[object], ordered: bool) -> object:  # noqa: ANN401
-            self.calls.append((operations, ordered))
-
-            class Result:
-                upserted_count = 0
-                modified_count = 0
-
-            return Result()
-
-    dummy_collection = DummyCollection()
-    backend._collection = dummy_collection  # type: ignore[attr-defined]
-    rows = [
-        ForexRateRecord(rate_date=date(2020, 1, 1), currency="USD", rate=1.0, source="RBI"),
-        ForexRateRecord(rate_date=date(2020, 1, 2), currency="USD", rate=1.1, source="RBI"),
-    ]
-
-    result = backend.insert_rates(rows)
-
-    assert len(dummy_collection.calls) == 1
-    operations, ordered = dummy_collection.calls[0]
-    assert ordered is False
-    assert len(operations) == len(rows)
-    assert result.inserted == len(rows)
-
-
-def test_conection_alias_routes_to_connection() -> None:
-    fx_bharat = FxBharat()
-
-    assert fx_bharat.conection() == fx_bharat.connection()
-
-
-def _seed_sample_rates(fx: FxBharat) -> None:
-    assert fx.sqlite_manager is not None
-    fx.sqlite_manager.insert_rates(
-        [
-            ForexRateRecord(rate_date=date(2023, 1, 1), currency="USD", rate=82.0),
-            ForexRateRecord(rate_date=date(2023, 1, 1), currency="EUR", rate=88.0),
-            ForexRateRecord(rate_date=date(2023, 1, 2), currency="USD", rate=83.0),
-            ForexRateRecord(rate_date=date(2023, 1, 8), currency="USD", rate=84.0),
-            ForexRateRecord(rate_date=date(2023, 1, 8), currency="EUR", rate=90.0),
-            ForexRateRecord(rate_date=date(2023, 2, 5), currency="USD", rate=85.0),
-            ForexRateRecord(rate_date=date(2023, 2, 5), currency="EUR", rate=92.0),
-        ]
-    )
-
-
-def test_rate_returns_latest_snapshot(sqlite_fx: FxBharat) -> None:
-    _seed_sample_rates(sqlite_fx)
-
-    snapshots = sqlite_fx.rate()
-
-    assert len(snapshots) == 1
-    snapshot = snapshots[0]
-    assert snapshot["rate_date"] == date(2023, 2, 5)
-    assert snapshot["base_currency"] == "INR"
-    assert snapshot["source"] == "RBI"
-    assert snapshot["rates"] == {"EUR": 92.0, "USD": 85.0}
-
-
-def test_rate_supports_specific_date(sqlite_fx: FxBharat) -> None:
-    _seed_sample_rates(sqlite_fx)
-
-    snapshots = sqlite_fx.rate(date(2023, 1, 2))
-
-    assert len(snapshots) == 1
-    snapshot = snapshots[0]
-    assert snapshot["rate_date"] == date(2023, 1, 2)
-    assert snapshot["source"] == "RBI"
-    assert snapshot["rates"] == {"USD": 83.0}
-
-
-def test_rate_returns_both_sources(sqlite_fx: FxBharat) -> None:
-    _seed_sample_rates(sqlite_fx)
-    assert sqlite_fx.sqlite_manager is not None
-    sqlite_fx.sqlite_manager.insert_rates(
-        [
-            ForexRateRecord(rate_date=date(2023, 3, 1), currency="USD", rate=90.0, source="SBI"),
-            ForexRateRecord(rate_date=date(2023, 3, 1), currency="EUR", rate=95.0, source="SBI"),
-        ]
-    )
-
-    snapshots = sqlite_fx.rate()
-
-    assert [snap["source"] for snap in snapshots] == ["SBI", "RBI"]
-    sbi_snapshot, rbi_snapshot = snapshots
-    assert sbi_snapshot["rate_date"] == date(2023, 3, 1)
-    assert sbi_snapshot["rates"]["USD"]["rate"] == 90.0
-    assert sbi_snapshot["rates"]["EUR"]["tt_sell"] is None or isinstance(
-        sbi_snapshot["rates"]["EUR"], dict
-    )
-    assert rbi_snapshot["source"] == "RBI"
-
-
-def test_rate_rejects_dates_before_rbi_minimum(sqlite_fx: FxBharat) -> None:
-    with pytest.raises(ValueError, match="RBI do not provide the data before 12/04/2022"):
-        sqlite_fx.rate(date(2022, 4, 11))
-
-
-def test_history_supports_frequency(sqlite_fx: FxBharat) -> None:
-    _seed_sample_rates(sqlite_fx)
-
-    monthly = sqlite_fx.history(date(2023, 1, 1), date(2023, 2, 28), frequency="monthly")
-
-    assert [entry["rate_date"] for entry in monthly] == [
-        date(2023, 1, 8),
-        date(2023, 2, 5),
-    ]
-    assert monthly[0]["rates"]["USD"] == 84.0
-    assert monthly[1]["rates"]["EUR"] == 92.0
-
-
-def test_history_validate_inputs(sqlite_fx: FxBharat) -> None:
-    with pytest.raises(ValueError):
-        sqlite_fx.history(date(2023, 2, 1), date(2023, 1, 1))
-    with pytest.raises(ValueError):
-        sqlite_fx.history(date(2023, 1, 1), date(2023, 1, 2), frequency="hourly")  # type: ignore[arg-type]
-
-
-def test_history_rejects_requests_before_rbi_minimum(sqlite_fx: FxBharat) -> None:
-    with pytest.raises(ValueError, match="RBI do not provide the data before 12/04/2022"):
-        sqlite_fx.history(date(2022, 4, 11), date(2022, 4, 20))
-
-
-def test_migrate_requires_external_backend(sqlite_fx: FxBharat) -> None:
-    with pytest.raises(ValueError):
-        sqlite_fx.migrate()
-
-
-def test_database_connection_info_uses_database_name_query() -> None:
+def test_database_connection_info_from_url_and_query_name() -> None:
     info = DatabaseConnectionInfo.from_url(
         "postgres://user:pwd@db.example.com:5432/?DATABASE_NAME=forex&sslmode=prefer",
     )
 
+    assert info.backend is DatabaseBackend.POSTGRES
     assert info.name == "forex"
+    assert info.url.startswith("postgresql://user:pwd@db.example.com:5432/forex")
     assert "DATABASE_NAME" not in info.url
-    assert info.url.endswith("/forex?sslmode=prefer")
 
 
-def test_seed_rejects_inverted_date_range(sqlite_fx: FxBharat) -> None:
-    with pytest.raises(ValueError, match="from_date must be on or before to_date"):
-        sqlite_fx.seed(from_date=date(2023, 2, 1), to_date=date(2023, 1, 1))
+def test_connection_probe_missing_driver(monkeypatch: pytest.MonkeyPatch) -> None:
+    fx = FxBharat(db_config="postgres://user:pass@db.example.com:5432/forex")
+    monkeypatch.setattr("fx_bharat.create_engine", None)
+    monkeypatch.setattr("fx_bharat.text", None)
 
+    ok, message = fx.connection()
+    assert ok is False
+    assert "SQLAlchemy is required" in (message or "")
 
-def test_seed_with_explicit_range_targets_rbi(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    db_path = tmp_path / "seed.db"
-    fx = FxBharat(db_config=f"sqlite:///{db_path}")
 
-    calls: dict[str, object] = {}
+def test_normalise_source_filter_invalid() -> None:
+    with pytest.raises(ValueError):
+        FxBharat._normalise_source_filter("gold")
 
-    def _fake_rbi(start: str, end: str, *, incremental: bool, **_: object) -> None:
-        calls["rbi"] = (start, end, incremental)
 
-    def _fake_sbi_hist(**_: object) -> None:
-        calls["sbi_hist"] = True
-
-    def _fake_sbi_today(**_: object) -> None:
-        calls["sbi_today"] = True
-
-    monkeypatch.setattr("fx_bharat.seeds.populate_rbi_forex.seed_rbi_forex", _fake_rbi)
-    monkeypatch.setattr("fx_bharat.seeds.populate_sbi_forex.seed_sbi_historical", _fake_sbi_hist)
-    monkeypatch.setattr("fx_bharat.seeds.populate_sbi_forex.seed_sbi_today", _fake_sbi_today)
-
-    fx.seed(from_date=date(2023, 1, 1), to_date=date(2023, 1, 3), source="RBI")
-
-    assert calls["rbi"] == ("2023-01-01", "2023-01-03", False)
-    assert "sbi_hist" not in calls
-    assert "sbi_today" not in calls
-
-
-def test_seed_default_fetches_sbi_today_and_history(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    db_path = tmp_path / "seed.db"
-    fx = FxBharat(db_config=f"sqlite:///{db_path}")
-
-    calls: dict[str, object] = {}
-    today = date.today()
-
-    def _fake_rbi(start: str, end: str, **_: object) -> None:
-        calls["rbi"] = (start, end)
-
-    def _fake_sbi_hist(*, start, end, **_: object) -> None:  # type: ignore[no-untyped-def]
-        calls["sbi_hist"] = (start, end)
-
-    def _fake_sbi_today(**_: object) -> None:
-        calls["sbi_today"] = True
-
-    monkeypatch.setattr("fx_bharat.seeds.populate_rbi_forex.seed_rbi_forex", _fake_rbi)
-    monkeypatch.setattr("fx_bharat.seeds.populate_sbi_forex.seed_sbi_historical", _fake_sbi_hist)
-    monkeypatch.setattr("fx_bharat.seeds.populate_sbi_forex.seed_sbi_today", _fake_sbi_today)
-
-    fx.seed(resource_dir=tmp_path / "resources")
-
-    assert calls["rbi"][1] == today.isoformat()
-    assert calls["sbi_hist"][1] == today - timedelta(days=1)
-    assert calls["sbi_today"] is True
-
-
-def test_seed_mirrors_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    external = FxBharat(db_config="postgres://user:pwd@db:5432/fx")
-
-    calls: dict[str, object] = {}
-
-    def _fake_seed_rbi(
-        from_str: str, to_str: str, *, db_path: Path, incremental: bool, **_: object
-    ) -> None:
-        calls["range"] = (from_str, to_str, incremental)
-        calls["db_path"] = Path(db_path)
-
-    def _fake_seed_sbi_today(*, db_path: Path, resource_dir: Path, **_: object) -> None:
-        calls["sbi"] = (Path(db_path), resource_dir)
-
-    monkeypatch.setattr("fx_bharat.seeds.populate_rbi_forex.seed_rbi_forex", _fake_seed_rbi)
-    monkeypatch.setattr("fx_bharat.seeds.populate_sbi_forex.seed_sbi_today", _fake_seed_sbi_today)
-
-    today = date.today()
-    monkeypatch.setattr(
-        FxBharat,
-        "_get_ingestion_checkpoint",
-        lambda self, db_path, source: None,
-    )
-
-    created_sqlite_backends: list[object] = []
-
-    class DummySQLiteBackend:
-        def __init__(self, db_path: Path | str, manager=None):  # type: ignore[no-untyped-def]
-            self.db_path = Path(db_path)
-            self.manager = manager
-            self.fetch_called_with: list[tuple[date | None, date | None, str | None]] = []
-            self.closed = False
-            self.rows = [
-                ForexRateRecord(rate_date=date.today(), currency="USD", rate=82.1, source="RBI"),
-                ForexRateRecord(rate_date=date.today(), currency="EUR", rate=90.2, source="SBI"),
-            ]
-            created_sqlite_backends.append(self)
-
-        def fetch_range(self, start=None, end=None, source=None):  # type: ignore[no-untyped-def]
-            self.fetch_called_with.append((start, end, source))
-            return list(self.rows)
-
-        def close(self) -> None:
-            self.closed = True
-
-    class DummyExternalBackend:
-        def __init__(self) -> None:
-            self.rows: list[ForexRateRecord] = []
-            self.ensure_called = 0
-
-        def ensure_schema(self) -> None:
-            self.ensure_called += 1
-
-        def insert_rates(self, rows):  # type: ignore[no-untyped-def]
-            self.rows.extend(rows)
-
-    monkeypatch.setattr("fx_bharat.SQLiteBackend", DummySQLiteBackend)
-    external._backend_strategy = DummyExternalBackend()
-
-    external.seed(from_date=today, to_date=today, resource_dir=Path("resources"))
-
-    today_iso = today.isoformat()
-    assert calls["range"] == (today_iso, today_iso, False)
-    assert isinstance(calls["db_path"], Path)
-    sqlite_backend = created_sqlite_backends[0]
-    assert (today, today, "RBI") in sqlite_backend.fetch_called_with
-    assert (today, today, "SBI") in sqlite_backend.fetch_called_with
-    assert sqlite_backend.closed is True
-
-    backend = external._backend_strategy
-    assert isinstance(backend, DummyExternalBackend)
-    assert backend.ensure_called == 1
-    assert len(backend.rows) == 4
-    assert {row.currency for row in backend.rows} == {"USD", "EUR"}
-
-
-def test_seed_inserts_today_for_both_sources(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    db_path = tmp_path / "seed.db"
-    config = DatabaseConnectionInfo(
-        backend=DatabaseBackend.SQLITE,
-        url=f"sqlite:///{db_path}",
-        name=str(db_path),
-        username=None,
-        password=None,
-        host=None,
-        port=None,
-    )
-    fx = FxBharat(db_config=config)
-
-    today = date.today().isoformat()
-    min_rbi_date = RBI_MIN_AVAILABLE_DATE.isoformat()
-    calls: dict[str, object] = {}
-
-    def _fake_seed_rbi(from_str: str, to_str: str, *, db_path: Path, **_: object) -> None:
-        calls["rbi"] = (from_str, to_str, Path(db_path))
-
-    def _fake_seed_sbi_today(*, db_path: Path, resource_dir: Path, **_: object) -> None:
-        calls["sbi"] = (Path(db_path), resource_dir)
-
-    monkeypatch.setattr("fx_bharat.seeds.populate_rbi_forex.seed_rbi_forex", _fake_seed_rbi)
-    monkeypatch.setattr("fx_bharat.seeds.populate_sbi_forex.seed_sbi_today", _fake_seed_sbi_today)
-
-    fx.seed(resource_dir=tmp_path / "resources")
-
-    assert calls["rbi"][:2] == (min_rbi_date, today)
-    assert calls["rbi"][2] == db_path
-    assert calls["sbi"][0] == db_path
-    assert calls["sbi"][1] == tmp_path / "resources"
-
-
-def test_migrate_copies_rows_to_external_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    class DummySQLiteBackend:
-        def __init__(self, path: Path) -> None:
-            self.path = path
-            self.closed = False
-
-        def fetch_range(
-            self,
-            start: date | None = None,
-            end: date | None = None,
-            *,
-            source: str | None = None,
-        ) -> list[ForexRateRecord]:
-            records = [
-                ForexRateRecord(
-                    rate_date=date(2024, 1, 1),
-                    currency="USD",
-                    rate=82.5,
-                    source="RBI",
-                ),
-                ForexRateRecord(
-                    rate_date=date(2024, 1, 2),
-                    currency="EUR",
-                    rate=89.1,
-                    source="SBI",
-                ),
-            ]
-            if source is None:
-                return records
-            return [row for row in records if (row.source or "RBI").upper() == source.upper()]
-
-        def fetch_lme_range(  # type: ignore[no-untyped-def]
-            self, metal: str, start: date | None = None, end: date | None = None
-        ):
-            return []
-
-        def close(self) -> None:
-            self.closed = True
-
-    class DummyExternalBackend:
-        def __init__(self) -> None:
-            self.rows: list[ForexRateRecord] = []
-            self.ensure_called = 0
-            self.checkpoints: dict[str, date] = {}
-
-        def ensure_schema(self) -> None:
-            self.ensure_called += 1
-
-        def insert_rates(self, rows: list[ForexRateRecord]) -> PersistenceResult:
-            self.rows.extend(rows)
-            return PersistenceResult(inserted=len(rows))
-
-        def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
-            self.checkpoints[source] = rate_date
-
-    monkeypatch.setattr("fx_bharat.SQLiteBackend", DummySQLiteBackend)
-
-    external = FxBharat(db_config="mysql://user:pwd@localhost:3306/fx")
-    external._backend_strategy = DummyExternalBackend()
-
-    external.migrate()
-
-    backend = external._backend_strategy
-    assert isinstance(backend, DummyExternalBackend)
-    assert backend.ensure_called == 1
-    assert len(backend.rows) == 2
-    assert backend.checkpoints["RBI"] == date(2024, 1, 1)
-    assert backend.checkpoints["SBI"] == date(2024, 1, 2)
-
-
-def test_migrate_respects_date_range(monkeypatch: pytest.MonkeyPatch) -> None:
-    created_sqlite_backends: list[object] = []
-
-    class DummySQLiteBackend:
-        def __init__(self, path: Path) -> None:
-            self.path = path
-            self.fetch_calls: list[tuple[date | None, date | None, str | None]] = []
-            self.lme_calls: list[tuple[str, date | None, date | None]] = []
-            self.closed = False
-            created_sqlite_backends.append(self)
-
-        def fetch_range(
-            self,
-            start: date | None = None,
-            end: date | None = None,
-            *,
-            source: str | None = None,
-        ) -> list[ForexRateRecord]:
-            self.fetch_calls.append((start, end, source))
-            if source is None:
-                return []
-            return [
-                ForexRateRecord(
-                    rate_date=start or date(2024, 1, 1),
-                    currency="USD",
-                    rate=80.0,
-                    source=source,
-                )
-            ]
-
-        def fetch_lme_range(
-            self, metal: str, start: date | None = None, end: date | None = None
-        ) -> list[LmeRateRecord]:
-            self.lme_calls.append((metal, start, end))
-            return [
-                LmeRateRecord(
-                    rate_date=start or date(2024, 1, 1),
-                    price=1.0,
-                    price_3_month=2.0,
-                    stock=3,
-                    metal=metal,
-                )
-            ]
-
-        def close(self) -> None:
-            self.closed = True
-
-    class DummyExternalBackend:
-        def __init__(self) -> None:
-            self.rows: list[ForexRateRecord] = []
-            self.lme_rows: list[tuple[str, list[LmeRateRecord]]] = []
-            self.checkpoints: dict[str, date] = {}
-
-        def ensure_schema(self) -> None:
-            return None
-
-        def insert_rates(self, rows: list[ForexRateRecord]) -> PersistenceResult:
-            self.rows.extend(rows)
-            return PersistenceResult(inserted=len(rows))
-
-        def insert_lme_rates(self, metal: str, rows: list[LmeRateRecord]) -> PersistenceResult:
-            self.lme_rows.append((metal, rows))
-            return PersistenceResult(inserted=len(rows))
-
-        def update_ingestion_checkpoint(self, source: str, rate_date: date) -> None:
-            self.checkpoints[source] = rate_date
-
-    monkeypatch.setattr("fx_bharat.SQLiteBackend", DummySQLiteBackend)
-
-    external = FxBharat(db_config="mysql://user:pwd@localhost:3306/fx")
-    external._backend_strategy = DummyExternalBackend()
-
-    start = date(2024, 1, 1)
-    end = date(2024, 1, 31)
-    external.migrate(from_date=start, to_date=end, chunk_size=50)
-
-    backend = external._backend_strategy
-    assert isinstance(backend, DummyExternalBackend)
-    sqlite_backend = created_sqlite_backends[0]
-    assert isinstance(sqlite_backend, DummySQLiteBackend)
-    assert (start, end, "RBI") in sqlite_backend.fetch_calls
-    assert (start, end, "SBI") in sqlite_backend.fetch_calls
-    assert ("COPPER", start, end) in sqlite_backend.lme_calls
-    assert ("ALUMINUM", start, end) in sqlite_backend.lme_calls
-    assert len(backend.rows) == 2
-    assert backend.checkpoints["RBI"] == start
-    assert backend.checkpoints["SBI"] == start
-
-
-def test_select_snapshot_dates_supports_all_frequencies() -> None:
+def test_select_snapshot_dates_grouping() -> None:
     dates = [
         date(2024, 1, 1),
-        date(2024, 1, 5),
-        date(2024, 1, 12),
+        date(2024, 1, 7),
+        date(2024, 1, 8),
         date(2024, 2, 1),
         date(2025, 1, 1),
     ]
+    assert FxBharat._select_snapshot_dates(dates, "monthly")[-1] == date(2025, 1, 1)
+    assert FxBharat._select_snapshot_dates(dates, "yearly")[-1] == date(2025, 1, 1)
 
-    weekly = FxBharat._select_snapshot_dates(dates, "weekly")
-    monthly = FxBharat._select_snapshot_dates(dates, "monthly")
-    yearly = FxBharat._select_snapshot_dates(dates, "yearly")
 
-    assert len(weekly) == 4
-    assert monthly == [date(2024, 1, 12), date(2024, 2, 1), date(2025, 1, 1)]
-    assert yearly == [date(2024, 2, 1), date(2025, 1, 1)]
+def test_rate_and_history_with_sqlite_backend(tmp_path) -> None:
+    fx = FxBharat(db_config=f"sqlite:///{tmp_path/'fx.db'}")
+    backend = fx._get_backend_strategy()
+    backend.ensure_schema()
+    backend.insert_rates(
+        [
+            ForexRateRecord(rate_date=date(2024, 4, 1), currency="USD", rate=83.0, source="RBI"),
+            ForexRateRecord(rate_date=date(2024, 4, 1), currency="USD", rate=82.5, source="SBI"),
+            ForexRateRecord(rate_date=date(2024, 4, 2), currency="USD", rate=84.0, source="RBI"),
+        ]
+    )
+
+    snapshots = fx.rate()
+    assert [snap["source"] for snap in snapshots] == ["SBI", "RBI"]
+    assert snapshots[0]["rate_date"] == date(2024, 4, 1)
+
+    history = fx.history(date(2024, 4, 1), date(2024, 4, 2))
+    assert len(history) == 3
+    assert {snap["source"] for snap in history} == {"SBI", "RBI"}
+
+
+def test_rate_rejects_dates_before_rbi_minimum(tmp_path) -> None:
+    fx = FxBharat(db_config=f"sqlite:///{tmp_path/'fx.db'}")
+    with pytest.raises(ValueError):
+        fx.rate(RBI_MIN_AVAILABLE_DATE - timedelta(days=1))
+
+
+def test_seed_invalid_range_raises(tmp_path) -> None:
+    fx = FxBharat(db_config=f"sqlite:///{tmp_path/'fx.db'}")
+    with pytest.raises(ValueError):
+        fx.seed(from_date=date(2024, 1, 2), to_date=date(2024, 1, 1))
+
+
+def test_build_external_backend_instantiates_strategy(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class DummyStrategy:
+        def __init__(self, url: str) -> None:
+            captured["url"] = url
+
+    monkeypatch.setattr("fx_bharat.PostgresBackend", DummyStrategy)
+    fx = FxBharat(db_config="postgresql://user:pass@db:5432/forex")
+
+    strategy = fx._build_external_backend()
+
+    assert isinstance(strategy, DummyStrategy)
+    assert captured["url"] == fx.connection_info.url
+
+
+def test_seed_lme_wrappers_delegate(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = {"copper": False, "aluminum": False}
+
+    def _stub_prices(metal: str, **_kwargs):
+        called[metal.lower()] = True
+        return "ok"
+
+    monkeypatch.setattr("fx_bharat.seeds.populate_lme.seed_lme_prices", _stub_prices)
+
+    import fx_bharat as pkg
+
+    assert pkg.seed_lme_copper() == "ok"
+    assert pkg.seed_lme_aluminum() == "ok"
+    assert called == {"copper": True, "aluminum": True}

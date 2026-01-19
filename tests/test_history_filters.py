@@ -4,28 +4,20 @@ from datetime import date
 
 import pytest
 
-from fx_bharat import DatabaseBackend, DatabaseConnectionInfo, FxBharat
+from fx_bharat import FxBharat
 from fx_bharat.ingestion.models import ForexRateRecord
 
 
 @pytest.fixture()
 def sqlite_fx(tmp_path):
     db_path = tmp_path / "fx.db"
-    config = DatabaseConnectionInfo(
-        backend=DatabaseBackend.SQLITE,
-        url=f"sqlite:///{db_path}",
-        name=str(db_path),
-        username=None,
-        password=None,
-        host=None,
-        port=None,
-    )
-    return FxBharat(db_config=config)
+    return FxBharat(db_config=f"sqlite:///{db_path}")
 
 
 def _seed_sample_data(app: FxBharat) -> None:
-    assert app.sqlite_manager is not None
-    app.sqlite_manager.insert_rates(
+    backend = app._get_backend_strategy()
+    backend.ensure_schema()
+    backend.insert_rates(
         [
             ForexRateRecord(rate_date=date(2024, 1, 1), currency="USD", rate=82.0, source="RBI"),
             ForexRateRecord(rate_date=date(2024, 1, 1), currency="USD", rate=81.5, source="SBI"),

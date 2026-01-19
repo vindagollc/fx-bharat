@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-RBI_MIN_AVAILABLE_DATE = date(2022, 4, 12)
+RBI_MIN_AVAILABLE_DATE = date(2022, 4, 1)
 RBI_MIN_DATE_MESSAGE = "RBI do not provide the data before 12/04/2022."
 
 
