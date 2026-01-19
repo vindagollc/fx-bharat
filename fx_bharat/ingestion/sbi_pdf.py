@@ -40,6 +40,9 @@ from fx_bharat.utils.logger import get_logger
 LOGGER = get_logger(__name__)
 
 SBI_FOREX_PDF_URL = "https://sbi.bank.in/documents/16012/1400784/FOREX_CARD_RATES.pdf"
+SBI_ARCHIVE_BASE_URL = (
+    "https://raw.githubusercontent.com/sahilgupta/sbi-fx-ratekeeper/main/pdf_files"
+)
 
 
 @dataclass(slots=True)

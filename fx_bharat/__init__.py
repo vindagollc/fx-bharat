@@ -10,15 +10,14 @@ from enum import Enum
 from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Literal, cast
-from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-from fx_bharat.db import DEFAULT_SQLITE_DB_PATH
 from fx_bharat.db.base_backend import BackendStrategy
 from fx_bharat.db.mongo_backend import MongoBackend
 from fx_bharat.db.mysql_backend import MySQLBackend
 from fx_bharat.db.postgres_backend import PostgresBackend
 from fx_bharat.db.sqlite_backend import SQLiteBackend
-from fx_bharat.db.sqlite_manager import PersistenceResult, SQLiteManager
+from fx_bharat.db.sqlite_manager import PersistenceResult
 from fx_bharat.ingestion.models import ForexRateRecord, LmeRateRecord
 from fx_bharat.utils.logger import get_logger
 from fx_bharat.utils.rbi import RBI_MIN_AVAILABLE_DATE, enforce_rbi_min_date
@@ -47,7 +46,7 @@ __all__ = [
     "seed_lme_prices",
     "seed_lme_copper",
     "seed_lme_aluminum",
-    "SQLiteManager",
+    "SQLiteBackend",
     "PersistenceResult",
     "RBISeleniumClient",
 ]
@@ -55,7 +54,7 @@ __all__ = [
 try:
     __version__ = importlib_metadata.version("fx-bharat")
 except importlib_metadata.PackageNotFoundError:  # pragma: no cover - fallback for local runs
-    __version__ = "0.3.1"
+    __version__ = "0.4.0"
 
 LOGGER = get_logger(__name__)
 
@@ -229,7 +228,7 @@ class DatabaseConnectionInfo:
 class FxBharat:
     """Package facade that centralises DB configuration."""
 
-    __slots__ = ("connection_info", "sqlite_manager", "backend", "_backend_strategy")
+    __slots__ = ("connection_info", "backend", "_backend_strategy")
 
     _DRIVER_HINTS: dict[DatabaseBackend, str] = {
         DatabaseBackend.POSTGRES: "Install psycopg2 or psycopg2-binary via 'pip install psycopg2-binary'.",
@@ -248,51 +247,29 @@ class FxBharat:
 
         Callers can supply either a fully fledged ``DatabaseConnectionInfo``
         object or a DSN string (``mysql://user:pwd@host/db``). When the argument
-        is omitted the FxBharat instance automatically falls back to the bundled
-        SQLite database so callers can be productive without additional
-        infrastructure. Providing a DSN switches the connection over to an
-        external database (MySQL, Postgres, MongoDB, etc.).
+        is omitted a ``ValueError`` is raised because an explicit database
+        connection is now required. Providing a DSN switches the connection over
+        to an external database (MySQL, Postgres, MongoDB, etc.).
         """
 
         self.connection_info = self._build_connection_info(
             db_config=db_config,
         )
         self.backend = self.connection_info.backend.value
-        self.sqlite_manager: SQLiteManager | None = None
         self._backend_strategy: BackendStrategy | None = None
-        self._initialise_backend()
+        self._backend_strategy = self._build_external_backend()
 
     @staticmethod
     def _build_connection_info(
         *,
         db_config: DatabaseConnectionInfo | str | None,
     ) -> DatabaseConnectionInfo:
+        if db_config is None:
+            raise ValueError("db_config is required; SQLite fallback has been removed.")
         if isinstance(db_config, DatabaseConnectionInfo):
             return db_config
         if isinstance(db_config, str):
             return DatabaseConnectionInfo.from_url(db_config)
-        # Default to SQLite with a sensible on-disk database name.
-        sqlite_name = str(DEFAULT_SQLITE_DB_PATH)
-        sqlite_url = f"sqlite:///{quote(DEFAULT_SQLITE_DB_PATH.as_posix(), safe='/:')}"
-        return DatabaseConnectionInfo(
-            backend=DatabaseBackend.SQLITE,
-            url=sqlite_url,
-            name=sqlite_name,
-            username=None,
-            password=None,
-            host=None,
-            port=None,
-        )
-
-    def _initialise_backend(self) -> None:
-        backend = self.connection_info.backend
-        if backend is DatabaseBackend.SQLITE:
-            db_path = Path(self.connection_info.name or DEFAULT_SQLITE_DB_PATH)
-            manager = SQLiteManager(db_path)
-            self.sqlite_manager = manager
-            self._backend_strategy = SQLiteBackend(db_path=db_path, manager=manager)
-        else:
-            self.sqlite_manager = None
 
     def _build_external_backend(self) -> BackendStrategy:
         backend = self.connection_info.backend
@@ -302,88 +279,15 @@ class FxBharat:
             return MySQLBackend(self.connection_info.url)
         if backend is DatabaseBackend.MONGODB:
             return MongoBackend(self.connection_info.url, database=self.connection_info.name)
+        if backend is DatabaseBackend.SQLITE:
+            db_path = Path(self.connection_info.name or "forex.db")
+            return SQLiteBackend(db_path=db_path)
         raise ValueError(f"Unsupported backend: {backend}")
 
     def _get_backend_strategy(self) -> BackendStrategy:
         if self._backend_strategy is None:
-            if self.connection_info.is_sqlite:
-                raise RuntimeError("SQLite backend strategy should have been initialised already")
             self._backend_strategy = self._build_external_backend()
         return self._backend_strategy
-
-    def uses_inhouse_sqlite(self) -> bool:
-        """Public helper that reveals whether SQLite is being used."""
-
-        return self.connection_info.is_sqlite
-
-    def migrate(
-        self,
-        from_date: date | None = None,
-        to_date: date | None = None,
-        *,
-        chunk_size: int = 1000,
-    ) -> None:
-        """Migrate the bundled SQLite data into the configured external backend."""
-
-        if self.connection_info.is_sqlite:
-            raise ValueError("Migration only supported for external databases.")
-        if chunk_size <= 0:
-            raise ValueError("chunk_size must be a positive integer")
-        if from_date and to_date and from_date > to_date:
-            raise ValueError("from_date must be on or before to_date")
-        source_backend = SQLiteBackend(DEFAULT_SQLITE_DB_PATH)
-        try:
-            rbi_rows = source_backend.fetch_range(from_date, to_date, source="RBI")
-            sbi_rows = source_backend.fetch_range(from_date, to_date, source="SBI")
-            rows = rbi_rows + sbi_rows
-            lme_fetcher = getattr(source_backend, "fetch_lme_range", None)
-            lme_copper: list[LmeRateRecord] = []
-            lme_aluminum: list[LmeRateRecord] = []
-            if callable(lme_fetcher):
-                lme_copper = cast(list[LmeRateRecord], lme_fetcher("COPPER", from_date, to_date))
-                lme_aluminum = cast(
-                    list[LmeRateRecord], lme_fetcher("ALUMINUM", from_date, to_date)
-                )
-        finally:
-            source_backend.close()
-        target_backend = self._get_backend_strategy()
-        target_backend.ensure_schema()
-        total_forex = len(rows)
-        if total_forex:
-            LOGGER.info("Migrating %s forex rows in chunks of %s", total_forex, chunk_size)
-            migrated = 0
-            for start in range(0, total_forex, chunk_size):
-                chunk = rows[start : start + chunk_size]
-                result = target_backend.insert_rates(chunk)
-                migrated += result.total
-                LOGGER.info("Migrated %s/%s forex rows", migrated, total_forex)
-        lme_batches: dict[str, list[LmeRateRecord]] = {
-            "COPPER": lme_copper,
-            "ALUMINUM": lme_aluminum,
-        }
-        for metal, lme_rows in lme_batches.items():
-            if lme_rows:
-                total_lme = len(lme_rows)
-                LOGGER.info(
-                    "Migrating %s LME %s rows in chunks of %s", total_lme, metal, chunk_size
-                )
-                migrated = 0
-                for start in range(0, total_lme, chunk_size):
-                    lme_chunk = lme_rows[start : start + chunk_size]
-                    result = target_backend.insert_lme_rates(metal, lme_chunk)
-                    migrated += result.total
-                    LOGGER.info("Migrated %s/%s LME %s rows", migrated, total_lme, metal)
-        checkpoints: dict[str, date] = {}
-        if rbi_rows:
-            checkpoints["RBI"] = max(row.rate_date for row in rbi_rows)
-        if sbi_rows:
-            checkpoints["SBI"] = max(row.rate_date for row in sbi_rows)
-        if lme_copper:
-            checkpoints["LME_COPPER"] = max(row.rate_date for row in lme_copper)
-        if lme_aluminum:
-            checkpoints["LME_ALUMINUM"] = max(row.rate_date for row in lme_aluminum)
-        for source, checkpoint in checkpoints.items():
-            target_backend.update_ingestion_checkpoint(source, checkpoint)
 
     def seed(
         self,
@@ -392,85 +296,86 @@ class FxBharat:
         *,
         source: Literal["RBI", "SBI", None] = None,
         resource_dir: str | Path | None = None,
-        incremental: bool = True,
+        incremental: bool = False,
+        include_lme: bool = True,
         dry_run: bool = False,
     ) -> None:
-        """Seed forex data into SQLite and mirror into external backends."""
+        """Seed forex and optional LME data directly into the configured backend.
+
+        Historical seeding always starts from 2020-01-01 unless a later ``from_date`` is
+        provided. All writes go straight to the user-supplied database; no bundled SQLite
+        fallback or migration step is used.
+        """
 
         if from_date and to_date and from_date > to_date:
             raise ValueError("from_date must be on or before to_date")
 
         today = date.today()
-        sqlite_db_path = (
-            Path(self.sqlite_manager.db_path)
-            if self.sqlite_manager is not None
-            else DEFAULT_SQLITE_DB_PATH
-        )
+        start_date = from_date or RBI_MIN_AVAILABLE_DATE
+        end_date = to_date or today
 
         target_sources = self._normalise_source_filter(source.lower() if source else None)
-        resolved_to = to_date or today
-        user_range_specified = from_date is not None or to_date is not None
-        mirror_windows: list[tuple[date | None, date | None, str | None]] = []
+        backend = self._get_backend_strategy()
+        backend.ensure_schema()
 
-        for current_source in target_sources:
-            if current_source == "RBI":
-                start_date = from_date or RBI_MIN_AVAILABLE_DATE
-                end_date = resolved_to
-                enforce_rbi_min_date(start_date, end_date)
-                seed_rbi_forex(
-                    start_date.isoformat(),
-                    end_date.isoformat(),
-                    db_path=sqlite_db_path,
-                    incremental=incremental if not user_range_specified else False,
-                    dry_run=dry_run,
-                )
-                checkpoint = self._get_ingestion_checkpoint(sqlite_db_path, "RBI")
-                mirror_start = from_date or (
-                    checkpoint + timedelta(days=1) if checkpoint else start_date
-                )
-                mirror_windows.append((mirror_start, end_date, "RBI"))
-                continue
+        if "RBI" in target_sources:
+            enforce_rbi_min_date(start_date, end_date)
+            seed_rbi_forex(
+                start_date.isoformat(),
+                end_date.isoformat(),
+                backend=backend,
+                incremental=incremental,
+                dry_run=dry_run,
+            )
 
-            include_today = resolved_to >= today
-            historical_end = today - timedelta(days=1) if include_today else resolved_to
-            sbi_start_date = from_date
-            if historical_end >= (sbi_start_date or historical_end):
+        if "SBI" in target_sources:
+            include_today = end_date >= today
+            historical_end = today - timedelta(days=1) if include_today else end_date
+            if historical_end >= start_date:
                 seed_sbi_historical(
-                    db_path=sqlite_db_path,
+                    backend=backend,
                     resource_dir=resource_dir or Path("resources"),
-                    start=sbi_start_date,
+                    start=start_date,
                     end=historical_end,
-                    download=False,
-                    incremental=incremental if not user_range_specified else False,
+                    download=True,
+                    incremental=incremental,
                     dry_run=dry_run,
                 )
             if include_today:
                 seed_sbi_today(
-                    db_path=sqlite_db_path,
+                    backend=backend,
                     resource_dir=resource_dir or Path("resources"),
                     dry_run=dry_run,
                 )
-            checkpoint = self._get_ingestion_checkpoint(sqlite_db_path, "SBI")
-            mirror_start = from_date or (
-                checkpoint + timedelta(days=1) if checkpoint else (sbi_start_date or historical_end)
-            )
-            mirror_windows.append((mirror_start, resolved_to, "SBI"))
 
-        if dry_run:
-            return None
+        if include_lme:
+            for metal in ("COPPER", "ALUMINUM"):
+                seed_lme_prices(
+                    metal,
+                    backend=backend,
+                    start=start_date,
+                    end=end_date,
+                    dry_run=dry_run,
+                )
 
-        if self.connection_info.is_external:
-            sqlite_backend = SQLiteBackend(db_path=sqlite_db_path)
-            try:
-                rows: list[ForexRateRecord] = []
-                for start, end, src in mirror_windows:
-                    rows.extend(sqlite_backend.fetch_range(start, end, source=src))
-            finally:
-                sqlite_backend.close()
+    def update_daily(
+        self,
+        *,
+        source: Literal["RBI", "SBI", None] = None,
+        include_lme: bool = True,
+        dry_run: bool = False,
+    ) -> None:
+        """Fetch and insert the latest available forex/LME rows into the configured backend."""
 
-            target_backend = self._get_backend_strategy()
-            target_backend.ensure_schema()
-            target_backend.insert_rates(rows)
+        today = date.today()
+        self.seed(
+            from_date=today,
+            to_date=today,
+            source=source,
+            include_lme=include_lme,
+            incremental=True,
+            dry_run=dry_run,
+        )
 
     def seed_lme(
         self,
@@ -480,32 +385,20 @@ class FxBharat:
         to_date: date | None = None,
         dry_run: bool = False,
     ) -> PersistenceResult:
-        """Seed LME prices into SQLite and mirror to an external backend if configured."""
+        """Seed LME prices directly into the configured backend."""
 
-        sqlite_db_path = (
-            Path(self.sqlite_manager.db_path)
-            if self.sqlite_manager is not None
-            else DEFAULT_SQLITE_DB_PATH
-        )
+        backend = self._get_backend_strategy()
+        backend.ensure_schema()
         seed_result = cast(
             "SeedResult",
             seed_lme_prices(
                 metal,
-                db_path=sqlite_db_path,
+                backend=backend,
                 start=from_date,
                 end=to_date,
                 dry_run=dry_run,
             ),
         )
-        if dry_run:
-            return seed_result.rows
-
-        if self.connection_info.is_external:
-            backend = self._get_backend_strategy()
-            backend.ensure_schema()
-            with SQLiteManager(sqlite_db_path) as manager:
-                lme_rows = manager.fetch_lme_range(metal, from_date, to_date)
-            backend.insert_lme_rates(metal, lme_rows)
         return seed_result.rows
 
     def rate(
@@ -634,12 +527,6 @@ class FxBharat:
             stacklevel=2,
         )
         return self.history(from_date, to_date, frequency=frequency, source_filter=source_filter)
-
-    def _get_ingestion_checkpoint(self, sqlite_db_path: Path, source: str) -> date | None:
-        if self.sqlite_manager is not None:
-            return self.sqlite_manager.ingestion_checkpoint(source)
-        with SQLiteManager(sqlite_db_path) as manager:
-            return manager.ingestion_checkpoint(source)
 
     @staticmethod
     def _group_rows_by_date(

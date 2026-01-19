@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from fx_bharat.db.sqlite_manager import SQLiteManager
+import pytest
+
+from fx_bharat.db.sqlite_backend import SQLiteBackend
 from fx_bharat.seeds.populate_sbi_forex import _iter_pdf_paths, seed_sbi_historical, seed_sbi_today
 
 
@@ -40,15 +42,14 @@ def test_seed_sbi_forex_downloads_latest_when_enabled(monkeypatch, tmp_path: Pat
 
     monkeypatch.setattr("fx_bharat.seeds.populate_sbi_forex.SBIPDFDownloader", DummyDownloader)
 
-    db_path = tmp_path / "db.sqlite"
+    backend = SQLiteBackend(db_path=tmp_path / "db.sqlite")
     result = seed_sbi_historical(
-        db_path=db_path, resource_dir=tmp_path / "resources", download=True
+        backend=backend, resource_dir=tmp_path / "resources", download=True
     )
 
     assert calls["fetch"] == 1
     assert result.inserted == 1
-    with SQLiteManager(db_path) as manager:
-        rows = manager.fetch_range(source="SBI")
+    rows = backend.fetch_range(source="SBI")
     assert len(rows) == 1
     usd = rows[0]
     assert usd.rate_date == date(2024, 2, 2)
@@ -77,13 +78,12 @@ def test_seed_sbi_today_downloads_and_persists(monkeypatch, tmp_path: Path) -> N
     monkeypatch.setattr("fx_bharat.seeds.populate_sbi_forex.SBIPDFDownloader", DummyDownloader)
 
     resources_dir = tmp_path / "resources"
-    db_path = tmp_path / "db.sqlite"
-    result = seed_sbi_today(db_path=db_path, resource_dir=resources_dir)
+    backend = SQLiteBackend(db_path=tmp_path / "db.sqlite")
+    result = seed_sbi_today(backend=backend, resource_dir=resources_dir)
 
     assert result.inserted == 1
     stored = resources_dir / "2025" / "1" / "2025-01-01.pdf"
     assert stored.exists()
-    with SQLiteManager(db_path) as manager:
-        rows = manager.fetch_range(source="SBI")
+    rows = backend.fetch_range(source="SBI")
     assert len(rows) == 1
     assert rows[0].rate_date == date(2025, 1, 1)

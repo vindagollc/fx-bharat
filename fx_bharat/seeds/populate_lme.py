@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from pathlib import Path
 from typing import Iterable, Literal
 
-from fx_bharat.db import DEFAULT_SQLITE_DB_PATH
-from fx_bharat.db.sqlite_manager import PersistenceResult, SQLiteManager
+from fx_bharat.db.base_backend import BackendStrategy
+from fx_bharat.db.sqlite_manager import PersistenceResult
 from fx_bharat.ingestion.lme import LME_URLS, LmeTableParseResult, fetch_lme_rates, parse_lme_table
 from fx_bharat.ingestion.models import LmeRateRecord
 from fx_bharat.utils.logger import get_logger
@@ -49,13 +48,13 @@ def _normalise_metal(metal: str) -> LmeMetal:
 def seed_lme_prices(
     metal: str,
     *,
-    db_path: str | Path = DEFAULT_SQLITE_DB_PATH,
+    backend: BackendStrategy,
     start: date | None = None,
     end: date | None = None,
     html: str | None = None,
     dry_run: bool = False,
 ) -> SeedResult:
-    """Seed LME metal prices into SQLite."""
+    """Seed LME metal prices into the configured backend."""
 
     normalised = _normalise_metal(metal)
     if dry_run:
@@ -67,11 +66,12 @@ def seed_lme_prices(
     else:
         parse_result = fetch_lme_rates(normalised)
     filtered_rows = _filter_rows(parse_result.rows, start=start, end=end)
-    with SQLiteManager(db_path) as manager:
-        result = manager.insert_lme_rates(normalised, filtered_rows)
-        if filtered_rows:
-            latest_day = max(row.rate_date for row in filtered_rows)
-            manager.update_ingestion_checkpoint(f"LME_{normalised}", latest_day)
+    result = backend.insert_lme_rates(normalised, filtered_rows)
+    if filtered_rows:
+        latest_day = max(row.rate_date for row in filtered_rows)
+        update_func = getattr(backend, "update_ingestion_checkpoint", None)
+        if callable(update_func):
+            update_func(f"LME_{normalised}", latest_day)
     LOGGER.info(
         "Seeded %s LME rows (inserted=%s, updated=%s)",
         normalised,

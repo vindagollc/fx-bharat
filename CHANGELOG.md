@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.0] - 2026-01-19
+### Breaking
+- Removed bundled SQLite database/resources; a database URL is now required.
+- Dropped the `migrate` helper and SQLite fallback APIs.
+### Added
+- Historical seeding now streams data directly into user databases, sourcing SBI archives from the public GitHub repo (`sahilgupta/sbi-fx-ratekeeper`) and RBI/LME data from live endpoints.
+- New `update_daily()` helper to fetch the latest RBI/SBI/LME rows each day.
+- Caching for RBI downloads: reuse existing monthly CSV/Excel files and skip Selenium fetch when present.
+- SBI archive downloader now skips already-downloaded PDFs and supports parallel batch downloads.
+- Broader test coverage across facades, relational backends (SQLite/MySQL/Postgres paths), Mongo ingestion checkpoints, and seed flows, lifting overall coverage above 90%.
+- RBI workbook converter now handles already-downloaded CSVs and falls back gracefully when `pandas.read_html` finds no tables.
+- Ingestion checkpoints now update `updated_at` on every write and guard against date regression across SQLite/MySQL/Postgres.
+- Seed flow defaults clarified: historical SBI ingestion stops before today while `seed_sbi_today` handles same-day ingest.
+- Example scripts updated to use explicit DB URLs and new seed/update paths.
+### Notes
+- SQLite remains supported only when explicitly configured via `db_config`; no database file ships with the package.
+### Changed
+- Historical seeding defaults to 2022-04-01 for RBI, SBI, and LME Copper/Aluminum.
+- LME seeding and SBI/RBI ingestion update `ingestion_metadata` directly in external backends.
+
 ## [0.3.1] - 2025-11-23
 ### Changed
 - `FxBharat.migrate()` now copies forex/LME rows in chunks and logs progress totals.
