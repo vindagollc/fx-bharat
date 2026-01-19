@@ -108,9 +108,15 @@ def test_seed_sbi_forex_populates_sqlite(tmp_path: Path) -> None:
     }
 
 
-def test_parser_reads_decimal_spacing_and_cn_from_pdf() -> None:
+def test_parser_reads_decimal_spacing_and_cn_from_pdf(tmp_path: Path) -> None:
     parser = SBIPDFParser()
-    pdf_path = Path("resources/2025/1/2025-01-01.pdf")
+    pdf_path = tmp_path / "2025-01-01.pdf"
+    pdf_path.write_text(
+        """
+        Date: 01/01/2025
+        USD 85.22 86.07 85.15 86.24 85.15 86.24 84.15 86.55
+        """
+    )
 
     parsed = parser.parse(pdf_path)
 
