@@ -8,7 +8,7 @@
 [![Python Versions](https://img.shields.io/pypi/pyversions/fx-bharat.svg)](https://pypi.org/project/fx-bharat/)
 ![Typed](https://img.shields.io/badge/typed-yes-blue.svg)
 ![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)
-![SQLite Included](https://img.shields.io/badge/database-SQLite-lightgrey)
+![Database Required](https://img.shields.io/badge/database-external-green)
 ![isort](https://img.shields.io/badge/imports-isort-%2300aacd.svg)
 ![flake8](https://img.shields.io/badge/flake8-enabled-blue.svg)
 ![mypy](https://img.shields.io/badge/mypy-checked-2a6df4.svg)
@@ -16,17 +16,19 @@
 
 ---
 
-**FxBharat** is an end-to-end Python package that automatically retrieves foreign-exchange reference rates published by the **Reserve Bank of India (RBI)**, normalizes the downloaded Excel/HTML workbooks, and stores them in a local or remote database.
+**FxBharat** is an end-to-end Python package that automatically retrieves foreign-exchange reference rates published by the **Reserve Bank of India (RBI)**, normalizes the downloaded Excel/HTML workbooks, and stores them in your database of choice (PostgreSQL, MySQL/MariaDB, MongoDB, or SQLite when explicitly configured). SBI historical PDFs are sourced from the public GitHub archive at `sahilgupta/sbi-fx-ratekeeper`, while RBI and LME data are fetched live from their respective endpoints.
 
-Every published wheel bundles historical forex data from:
+> ⚠️ **Breaking change (0.4.0):** The bundled SQLite snapshot/resources have been removed. You must provide a database URL, and historical seeding now pulls SBI PDFs from the public GitHub archive while RBI/LME data are fetched live.
 
-> RBI archive ingested from **07/01/2020 → 07/01/2026**
+Historical data is ingested live from:
 
-> SBI Forex PDFs ingested from **07/01/2020 → 08/01/2026**
+> RBI reference rate archive (starting 01/04/2022)
 
-> LME (COPPER and ALUMINUM) ingested from **02/01/2008 → 07/01/2026**
+> SBI Forex PDFs sourced from the public GitHub archive `sahilgupta/sbi-fx-ratekeeper` (starting 01/04/2022)
 
-so the package is **immediately useful** with no setup required.
+> LME (COPPER and ALUMINUM) scraped live (data generally available from 2008)
+
+Provide your own database URL; no bundled database is shipped.
 
 ---
 
@@ -38,14 +40,13 @@ so the package is **immediately useful** with no setup required.
 * [Package Layout](#package-layout)
 * [Database Schema](#database-schema)
 * [Usage](#usage)
-  * [1. Quick Start (Bundled SQLite)](#1-quick-start-using-bundled-sqlite-database)
-    * [Sqlite Example](#example-default-sqlite)
-  * [Source Selection (RBI vs SBI)](#source-selection-rbi-vs-sbi)
-  * [2. External Database Examples](#2-connecting-to-your-own-database)
-    * [Checking Database Connectivity](#checking-database-connectivity-external)
-    * [PostgreSQL Example](#example-postgresql)
-    * [MySQL/MariaDB Example](#example-mysqlmariadb)
-    * [MongoDB Example](#example-mongodb)
+* [Quick Start](#quick-start)
+* [Source Selection (RBI vs SBI)](#source-selection-rbi-vs-sbi)
+* [Connecting to your database](#connecting-to-your-own-database)
+  * [Checking Database Connectivity](#checking-database-connectivity-external)
+  * [PostgreSQL Example](#example-postgresql)
+  * [MySQL/MariaDB Example](#example-mysqlmariadb)
+  * [MongoDB Example](#example-mongodb)
   * [Ingestion Controls](#ingestion-controls)
 * [Backend Requirements](#backend-requirements)
 * [Running Tests](#running-tests)
@@ -61,7 +62,7 @@ FxBharat provides:
 
 * 🔄 Automated Selenium workflow to download daily reference rates
 * 📑 Parsing of RBI Excel/HTML into clean pandas DataFrames
-* 💾 Out-of-the-box storage via SQLite (bundled), PostgreSQL, MySQL/MariaDB, or MongoDB
+* 💾 Storage via PostgreSQL, MySQL/MariaDB, MongoDB, or SQLite (when explicitly configured)
 * 📈 Easy APIs to fetch latest rates or historical rollups
 * 🧩 A clean façade (`FxBharat`) to simplify ingestion and queries
 * 📦 Type-annotated, structured, and production-ready ingestion pipeline
@@ -134,10 +135,9 @@ pip install -e .
 fx_bharat/
     __init__.py               # FxBharat façade
     db/
-        forex.db              # Bundled SQLite snapshot
         base_backend.py       # Unified DB backend interface
-        relational_backend.py # SQLAlchemy ORM helpers
-        sqlite_backend.py     # SQLite adapter (default)
+        relational_backend.py # SQLAlchemy helpers
+        sqlite_backend.py     # SQLite adapter (explicit DB_URL required)
         postgres_backend.py   # PostgreSQL adapter
         mysql_backend.py      # MySQL/MariaDB adapter
         mongo_backend.py      # MongoDB adapter via PyMongo
@@ -204,6 +204,11 @@ erDiagram
         INTEGER stock
         TIMESTAMP created_at
     }
+    ingestion_metadata {
+        TEXT source PK
+        DATE last_ingested_date
+        TIMESTAMP updated_at
+    }
     forex_rates_sbi ||--|| forex_rates_rbi : "aligned by rate_date/currency"
     lme_copper_rates ||--|| lme_aluminum_rates : "daily LME cash seller"
 ```
@@ -212,26 +217,21 @@ erDiagram
 
 # **Usage**
 
-## **1. Quick Start (Using Bundled SQLite Database)**
-
-Most users can begin with **zero configuration**:
+## **Quick Start (External DB Required)**
 
 ```python
 from datetime import date
 from fx_bharat import FxBharat
 
-fx = FxBharat()  # Uses bundled SQLite forex.db
+# Provide your database URL (Postgres/MySQL/Mongo/SQLite)
+fx = FxBharat(db_config="postgresql://user:pwd@localhost/forex")
 
-# Insert today's RBI + SBI data
+# Seed historical RBI + SBI + LME (copper, aluminum) from 2022-04-01 to today
 fx.seed()
 
 # Get latest available snapshots (SBI first, then RBI)
 latest = fx.rate()
 print(latest)
-# => [
-#   {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'source': 'SBI', 'rates': {...}},
-#   {'rate_date': datetime.date(2025, 11, 18), 'base_currency': 'INR', 'source': 'RBI', 'rates': {...}},
-# ]
 
 # Get a specific day's snapshots (optional `rate_date`)
 print(fx.rate(rate_date=date(2025, 11, 1)))
@@ -243,9 +243,11 @@ for snapshot in history:
     print(snapshot["rate_date"], snapshot["source"], snapshot["rates"].get("USD"))
 ```
 
+> Prefer SQLite? Supply your own path, e.g. `FxBharat(db_config="sqlite:///./forex.db")`.
+
 ### What these methods do:
 
-* `.seed(start_date, end_date)` → Downloads & inserts missing entries
+* `.seed(start_date, end_date)` → Downloads & inserts missing entries directly into your DB (no bundled SQLite)
 * `.rate(rate_date=None)` → Returns **latest available** SBI and RBI observations (or specific `rate_date` snapshots) with SBI first
 * `.history(start, end, frequency)` → Supports
 
@@ -264,7 +266,7 @@ fx.seed_lme("COPPER")
 fx.seed_lme("ALUMINUM")
 ```
 
-These functions populate the bundled SQLite database and mirror into any configured external backend.
+All seeding writes directly to your configured database; there is no bundled SQLite datastore.
 
 ### LME History (Copper & Aluminum)
 
@@ -289,46 +291,20 @@ copper_history = fx.history_lme(
 
 > Legacy note: the former `.rates()` helper now lives on as a deprecated alias of `.history()`; new code should prefer `.history()` or `.historical()`.
 
----
-
-### Example: Default (Sqlite)
+### Daily update shortcut
 
 ```python
-from datetime import date
-
 from fx_bharat import FxBharat
 
-print(FxBharat.__version__)  # 0.3.0
+fx = FxBharat(db_config="postgresql://user:pwd@localhost/forex")
 
-# Default Usage
-fx = FxBharat()
-
-# Latest Forex entries (SBI then RBI if available)
-rates = fx.rate()
-print(rates)
-
-# Specific Forex entries by date (optional rate_date)
-historical_rates = fx.rate(rate_date=date(2025, 11, 1))
-print(historical_rates)
-
-# Daily Forex entries (SBI first, then RBI snapshots)
-rates = fx.history(from_date=date(2025, 11, 1), to_date=date.today(), frequency='daily')
-print(rates[:2])
-
-# Monthly Forex entries
-monthly_rates = fx.history(from_date=date(2025, 9, 1), to_date=date.today(), frequency='monthly')
-print(monthly_rates)
-
-# Yearly Forex entries
-yearly_rates = fx.history(from_date=date(2023, 9, 1), to_date=date.today(), frequency='yearly')
-print(yearly_rates)
-
-fx.seed()
+# Pull just today's RBI/SBI/LME data into your DB
+fx.update_daily()
 ```
 
 ## Source Selection (RBI vs SBI)
 
-FxBharat now stores RBI and SBI data in **separate tables/collections**. Query helpers always return SBI snapshots first (when present) followed by RBI snapshots. Use the unified `seed(from_date=..., to_date=..., source=...)` helper to ingest targeted ranges; calling `seed()` with no arguments replays data for both sources from the last recorded checkpoint through today (including today) and stores the SBI PDF in `resources/`.
+FxBharat now stores RBI and SBI data in **separate tables/collections**. Query helpers always return SBI snapshots first (when present) followed by RBI snapshots. Use the unified `seed(from_date=..., to_date=..., source=...)` helper to ingest targeted ranges; calling `seed()` with no arguments replays data for both sources (and LME) from 2022-04-01 through today and stores downloaded SBI PDFs under your chosen `resource_dir`.
 
 ---
 
@@ -336,10 +312,10 @@ FxBharat now stores RBI and SBI data in **separate tables/collections**. Query h
 
 * `source_filter` on `rate`, `history`, and `rates` lets you restrict output to `"rbi"` or `"sbi"` while keeping blended ordering.
 * `source_filter` on `history_lme` accepts `"COPPER"` or `"ALUMINUM"` (case-insensitive).
-* Incremental seeding is enabled by default using the new `ingestion_metadata` table; the last ingested `rate_date` per source is detected and skipped automatically during cron-style runs.
+* Historical seeding defaults to the window from **2022-04-01**; set `incremental=True` if you want to resume from the database ingestion checkpoints instead.
 * Pass `dry_run=True` to `seed`, `seed_sbi_historical`, or `seed_rbi_forex` to validate connectivity without writing rows.
 * Yearly aggregations now select the most recent snapshot per calendar year for each source.
-* `seed` accepts optional `from_date`, `to_date`, and `source` parameters to restrict ingestion. When you omit them, FxBharat resumes from the last metadata checkpoint for both sources and ingests through today.
+* `seed` accepts optional `from_date`, `to_date`, and `source` parameters to restrict ingestion. When you omit them, FxBharat ingests 2022-04-01 → today for both sources and LME.
 
 ## **2. Connecting to Your Own Database**
 
@@ -564,13 +540,9 @@ simultaneously can zero-out the generated `.coverage` file and lead to the 0% re
 
 FxBharat is built on the following principles:
 
-### 🚀 Immediate usability
+### 🧱 Explicit configuration
 
-A full SQLite archive is bundled so users can begin querying instantly.
-
-### 🧱 Zero-config default
-
-`FxBharat()` alone is enough for most workflows.
+Provide your database URL up front; ingestion streams directly into your DB of choice.
 
 ### 🔌 Plug-and-play backends
 

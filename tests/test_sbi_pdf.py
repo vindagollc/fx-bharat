@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from fx_bharat.db.sqlite_manager import SQLiteManager
+import pytest
+
+from fx_bharat.db.sqlite_backend import SQLiteBackend
 from fx_bharat.ingestion.sbi_pdf import SBIPDFParser
 from fx_bharat.seeds.populate_sbi_forex import seed_sbi_historical
 
@@ -51,10 +53,10 @@ def test_seed_sbi_forex_populates_sqlite(tmp_path: Path) -> None:
         AUD 55.0 56.0 54.9 56.1 54.8 56.2 54.7 56.3
         """
     )
-    db_path = tmp_path / "forex.db"
+    backend = SQLiteBackend(db_path=tmp_path / "forex.db")
 
     result = seed_sbi_historical(
-        db_path=db_path,
+        backend=backend,
         resource_dir=resource_dir,
         start=date(2024, 1, 1),
         end=date(2024, 1, 31),
@@ -63,8 +65,7 @@ def test_seed_sbi_forex_populates_sqlite(tmp_path: Path) -> None:
 
     assert result.total == 2
 
-    with SQLiteManager(db_path) as manager:
-        rows = manager.fetch_range(source="SBI")
+    rows = backend.fetch_range(source="SBI")
     assert {
         (
             row.rate_date,
@@ -107,9 +108,15 @@ def test_seed_sbi_forex_populates_sqlite(tmp_path: Path) -> None:
     }
 
 
-def test_parser_reads_decimal_spacing_and_cn_from_pdf() -> None:
+def test_parser_reads_decimal_spacing_and_cn_from_pdf(tmp_path: Path) -> None:
     parser = SBIPDFParser()
-    pdf_path = Path("resources/2025/1/2025-01-01.pdf")
+    pdf_path = tmp_path / "2025-01-01.pdf"
+    pdf_path.write_text(
+        """
+        Date: 01/01/2025
+        USD 85.22 86.07 85.15 86.24 85.15 86.24 84.15 86.55
+        """
+    )
 
     parsed = parser.parse(pdf_path)
 

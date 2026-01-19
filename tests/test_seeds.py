@@ -11,6 +11,7 @@ from typing import List
 
 import pytest
 
+from fx_bharat.db.sqlite_backend import SQLiteBackend
 from fx_bharat.ingestion.models import ForexRateRecord
 from fx_bharat.seeds import populate_rbi_forex as seeds_module
 
@@ -27,7 +28,7 @@ def test_seed_rbi_forex_coordinates_pipeline(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     recorded: List[_RecordedCall] = []
-    inserted_rows: List[ForexRateRecord] = []
+    backend = SQLiteBackend(db_path=tmp_path / "fx.db")
 
     class DummyConverter:
         def to_csv(
@@ -45,31 +46,6 @@ def test_seed_rbi_forex_coordinates_pipeline(
                 ForexRateRecord(rate_date=date(2024, 1, 1), currency="USD", rate=82.5),
                 ForexRateRecord(rate_date=date(2024, 1, 1), currency="EUR", rate=89.1),
             ]
-
-    class DummyManager:
-        def __init__(self, db_path: Path) -> None:
-            self.db_path = db_path
-
-        def __enter__(self) -> "DummyManager":
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:
-            return None
-
-        def insert_rates(self, rows: List[ForexRateRecord]):
-            inserted_rows.extend(rows)
-            from fx_bharat.db.sqlite_manager import PersistenceResult
-
-            return PersistenceResult(inserted=len(rows), updated=0)
-
-        def latest_rate_date(self, source: str):  # type: ignore[no-untyped-def]
-            return None
-
-        def ingestion_checkpoint(self, source: str):  # type: ignore[no-untyped-def]
-            return None
-
-        def update_ingestion_checkpoint(self, source: str, rate_date: date):  # type: ignore[no-untyped-def]
-            recorded.append((source, rate_date))
 
     class DummyClient:
         def __init__(self, *, download_dir: Path | None, headless: bool) -> None:
@@ -91,30 +67,32 @@ def test_seed_rbi_forex_coordinates_pipeline(
     monkeypatch.setattr(seeds_module, "RBIWorkbookConverter", lambda: DummyConverter())
     monkeypatch.setattr(seeds_module, "RBICSVParser", lambda: DummyParser())
     monkeypatch.setattr(seeds_module, "RBISeleniumClient", DummyClient)
-    monkeypatch.setattr(seeds_module, "SQLiteManager", lambda db_path: DummyManager(Path(db_path)))
     monkeypatch.setattr(
         seeds_module,
         "month_ranges",
         lambda start, end: [SimpleNamespace(start=date(2024, 1, 1), end=date(2024, 1, 31))],
     )
 
-    result = seeds_module.seed_rbi_forex("2024-01-01", "2024-01-31", db_path=tmp_path / "fx.db")
+    result = seeds_module.seed_rbi_forex("2024-01-01", "2024-01-31", backend=backend)
 
     assert result.inserted == 2
     assert recorded
-    assert inserted_rows
+    rows = backend.fetch_range(source="RBI")
+    assert len(rows) == 2
 
 
 def test_seed_rbi_forex_rejects_dates_before_rbi_minimum(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="RBI do not provide the data before 12/04/2022"):
-        seeds_module.seed_rbi_forex("2022-04-01", "2022-04-30", db_path=tmp_path / "fx.db")
+        seeds_module.seed_rbi_forex(
+            "2022-03-31", "2022-04-02", backend=SQLiteBackend(db_path=tmp_path / "fx.db")
+        )
 
 
 def test_seed_rbi_forex_supports_dry_run(tmp_path: Path) -> None:
     result = seeds_module.seed_rbi_forex(
         "2024-01-01",
         "2024-01-02",
-        db_path=tmp_path / "fx.db",
+        backend=SQLiteBackend(db_path=tmp_path / "fx.db"),
         dry_run=True,
     )
 
@@ -166,8 +144,8 @@ def test_parse_args_consumes_expected_cli(monkeypatch: pytest.MonkeyPatch) -> No
             "2024-01-01",
             "--to",
             "2024-01-31",
-            "--db",
-            "custom.db",
+            "--db-url",
+            "sqlite:///custom.db",
             "--no-headless",
             "--download-dir",
             "downloads",
@@ -178,7 +156,7 @@ def test_parse_args_consumes_expected_cli(monkeypatch: pytest.MonkeyPatch) -> No
 
     assert args.start == "2024-01-01"
     assert args.end == "2024-01-31"
-    assert args.db_path == "custom.db"
+    assert args.db_url == "sqlite:///custom.db"
     assert args.headless is False
     assert args.download_dir == "downloads"
 
@@ -187,7 +165,7 @@ def test_main_invokes_seed_with_parsed_arguments(monkeypatch: pytest.MonkeyPatch
     class DummyNamespace:
         start = "2024-01-01"
         end = "2024-01-02"
-        db_path = "path.db"
+        db_url = "sqlite:///path.db"
         headless = True
         download_dir = None
 
@@ -199,8 +177,18 @@ def test_main_invokes_seed_with_parsed_arguments(monkeypatch: pytest.MonkeyPatch
         called["kwargs"] = kwargs
 
     monkeypatch.setattr(seeds_module, "seed_rbi_forex", _fake_seed)
+    class _DummyFx:
+        def __init__(self, db_config):  # type: ignore[no-untyped-def]
+            self.db_config = db_config
+
+        def _get_backend_strategy(self):
+            return object()
+
+    monkeypatch.setattr("fx_bharat.FxBharat", _DummyFx)
 
     seeds_module.main()
 
     assert called["args"] == ("2024-01-01", "2024-01-02")
-    assert called["kwargs"]["db_path"] == "path.db"
+    assert "backend" in called["kwargs"]
+    assert called["kwargs"]["headless"] is True
+    assert called["kwargs"]["download_dir"] is None

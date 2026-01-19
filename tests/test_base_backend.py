@@ -33,3 +33,7 @@ def test_base_backend_lme_methods_raise_not_implemented() -> None:
         backend.insert_lme_rates("COPPER", [])
     with pytest.raises(NotImplementedError):
         backend.fetch_lme_range("COPPER")
+    with pytest.raises(NotImplementedError):
+        backend.ingestion_checkpoint("RBI")
+    with pytest.raises(NotImplementedError):
+        backend.update_ingestion_checkpoint("RBI", date(2024, 1, 1))

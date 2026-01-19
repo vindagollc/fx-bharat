@@ -42,6 +42,7 @@ from fx_bharat.utils.logger import get_logger
 
 LOGGER = get_logger(__name__)
 RBI_ARCHIVE_URL = "https://www.rbi.org.in/Scripts/ReferenceRateArchive.aspx"
+VALID_DOWNLOAD_SUFFIXES = (".xls", ".xlsx", ".xlsm", ".csv")
 
 
 class RBINoReferenceRateError(RuntimeError):
@@ -147,6 +148,19 @@ class RBISeleniumClient:
         if start_date > end_date:
             raise ValueError("start date must not exceed end date")
 
+        safe_start = start_date.isoformat()
+        safe_end = end_date.isoformat()
+        base_name = f"rbi_reference_rates_{safe_start}_to_{safe_end}"
+        cached = self._cached_download(start_date, end_date)
+        if cached:
+            LOGGER.info(
+                "Reusing existing RBI download for %s → %s at %s",
+                start_date,
+                end_date,
+                cached,
+            )
+            return cached
+
         try:
             downloaded_file = cast(Path, self._download_with_retries(start_date, end_date))
         except RetryError as exc:  # pragma: no cover - selenium heavy
@@ -155,11 +169,7 @@ class RBISeleniumClient:
             if last_exception is not None:
                 raise last_exception
             raise RuntimeError("RetryError raised without underlying exception")
-        safe_start = start_date.isoformat()
-        safe_end = end_date.isoformat()
-        final_name = (
-            f"rbi_reference_rates_{safe_start}_to_{safe_end}{downloaded_file.suffix.lower()}"
-        )
+        final_name = f"{base_name}{downloaded_file.suffix.lower()}"
         final_path = downloaded_file.with_name(final_name)
         if downloaded_file != final_path:
             downloaded_file.rename(final_path)
@@ -213,7 +223,7 @@ class RBISeleniumClient:
         """Wait for Chrome to complete downloading the Excel file."""
 
         partial_patterns = ("*.crdownload", "*.tmp")
-        valid_extensions = {".xls", ".xlsx", ".xlsm"}
+        valid_extensions = set(VALID_DOWNLOAD_SUFFIXES)
 
         def _download_ready(_: webdriver.Chrome) -> Path | bool:
             files = [
@@ -330,3 +340,16 @@ class RBISeleniumClient:
 
         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
         self.driver.execute_script("arguments[0].click();", element)
+
+    def _cached_download(self, start_date: date, end_date: date) -> Path | None:
+        base_name = f"rbi_reference_rates_{start_date.isoformat()}_to_{end_date.isoformat()}"
+        candidates: list[Path] = []
+        for suffix in VALID_DOWNLOAD_SUFFIXES:
+            candidates.append(self.download_dir / f"{base_name}{suffix}")
+        # Also check the post-conversion CSV naming pattern produced by RBIWorkbookConverter
+        legacy_name = f"RBI_Reference_Rates_{start_date.strftime('%d-%m-%Y')}_to_{end_date.strftime('%d-%m-%Y')}.csv"
+        candidates.append(self.download_dir / legacy_name)
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        return None

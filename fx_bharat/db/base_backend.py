@@ -36,6 +36,11 @@ class BackendStrategy(ABC):
         msg = f"LME inserts not implemented for backend {type(self).__name__}"
         raise NotImplementedError(msg)
 
+    def ingestion_checkpoint(self, source: str) -> date | None:
+        """Return the last ingested date for the source, if tracked."""
+        msg = f"Ingestion checkpoint not implemented for backend {type(self).__name__}"
+        raise NotImplementedError(msg)
+
     def fetch_lme_range(
         self, metal: str, start: date | None = None, end: date | None = None
     ) -> list[LmeRateRecord]:
