@@ -14,9 +14,8 @@ class IngestionStrategy(Protocol):
     return a local ``Path`` pointing at the downloaded artifact.
     """
 
-    def fetch(
-        self, start_date: date, end_date: date, *, destination: Path | None = None
-    ) -> Path: ...  # pragma: no cover - protocol definition
+    def fetch(self, start_date: date, end_date: date, *, destination: Path | None = None) -> Path:
+        ...  # pragma: no cover - protocol definition
 
 
 __all__ = ["IngestionStrategy"]

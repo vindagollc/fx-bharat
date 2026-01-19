@@ -11,11 +11,7 @@ from urllib.request import urlretrieve
 
 from fx_bharat.db.base_backend import BackendStrategy
 from fx_bharat.db.sqlite_manager import PersistenceResult
-from fx_bharat.ingestion.sbi_pdf import (
-    SBI_ARCHIVE_BASE_URL,
-    SBIPDFDownloader,
-    SBIPDFParser,
-)
+from fx_bharat.ingestion.sbi_pdf import SBI_ARCHIVE_BASE_URL, SBIPDFDownloader, SBIPDFParser
 from fx_bharat.utils.logger import get_logger
 
 LOGGER = get_logger(__name__)
